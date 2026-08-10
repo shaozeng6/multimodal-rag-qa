@@ -116,43 +116,32 @@ def human_approval(state: MultiModalRAGState):
 
 
 async def regenerate_node(state: MultiModalRAGState, config: RunnableConfig):
-    """审批 reject 后重新生成: 综合 草稿+驳回原因+知识库上下文 改进回答。"""
+    """审批 reject 后重新生成: 复用生成器上下文(摘要+历史+知识库带标签+引用编号规则),
+    叠加 草稿+驳回原因, 让模型带着完整语境改进回答; 证据同样重算。"""
     draft = state.get("answer") or ""
     human_reason = state.get("human_reason") or ""
+    summary = state.get("summary") or ""
     kb_context = state.get("kb_context") or []
+    messages = state.get("messages") or []
     input_text = state.get("input_text") or ""
     input_image = state.get("input_image") or ""
 
-    context_summary = ""
-    if kb_context:
-        context_summary = "\n".join(
-            f"检索内容{i}: {hit.get('text', '')}" for i, hit in enumerate(kb_context, 1)
-        )
+    # 与 generator 同一套基础提示词(摘要+检索结果+来源标签+引用编号规则+表格规则),
+    # 保证重生成也按 [检索内容N] 编号引用 → 证据可重算、前端可展示
+    base_prompt = _build_system_prompt(summary, kb_context, state.get("image_relation") or "")
+    reject_block = (
+        "\n\n[本轮回答被用户驳回]\n"
+        f"驳回原因: {human_reason or '(用户未填写具体原因)'}\n"
+        f"被驳回的草稿:\n{draft or '(无草稿)'}\n"
+        "针对驳回原因改进回答: 不要简单重复草稿; 保留草稿中正确的部分, "
+        "综合参考上下文与草稿完善。"
+    )
+    system_prompt = base_prompt + reject_block
 
-    system_content = f"""你是一个智能体助手。用户之前的提问被系统回答后, 该回答被用户驳回, 请基于以下信息重新生成更完善的回答。
-
-用户驳回原因: {human_reason or "(用户未填写具体原因)"}
-
-系统之前的回答(被驳回的草稿):
-{draft or "(无草稿)"}
-"""
-    if context_summary:
-        system_content += f"\n知识库检索到的参考内容:\n{context_summary}"
-    system_content += """
-要求:
-1. 响应必须使用 Markdown 格式
-2. 针对用户驳回原因中指出的问题进行改进, 不要简单重复草稿内容
-3. 综合参考草稿和知识库上下文, 保留草稿中正确的部分, 改进不足之处
-4. 如果上下文内容中包含 HTML 表格(<table> 标签), 请转换为 Markdown 表格格式输出
-"""
-    user_content: list = []
-    if input_text:
-        user_content.append({"type": "text", "text": input_text})
-    if input_image:
-        user_content.append({"type": "image_url", "image_url": {"url": input_image}})
-
+    user_content = _build_user_content(input_text, input_image)
+    history_window = get_working_window(messages)
     response = await multiModal_llm.ainvoke(
-        [SystemMessage(content=system_content), HumanMessage(content=user_content)],
+        [SystemMessage(content=system_prompt), *history_window, HumanMessage(content=user_content)],
         config=config,
     )
     answer = response.content if isinstance(response.content, str) else str(response.content)
