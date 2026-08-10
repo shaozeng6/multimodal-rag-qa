@@ -1,0 +1,210 @@
+// ============================================================
+// 全局样式: "纸与墨的知识桌" 设计语言
+// 多模态 RAG 知识库问答系统企业版前端
+//
+// 色板: 暖墨 ink(页面) / 纸 paper(AI 内容) / 黄铜 brass(唯一强调)
+// 字体: 宋体(文档腔) + 无衬线(正文) + 等宽(数据/管道)
+// ============================================================
+
+// ---------- 设计 token ----------
+:root {
+  // 色板
+  --ink: #17151b;                 // 页面底色(暖黑, 微紫调, 非深蓝)
+  --surface: #211d27;             // chrome: 侧栏/顶栏/输入
+  --surface-2: #2a2531;           // 悬停/浮起面
+  --surface-3: #332d3d;           // 输入框/更深浮起
+  --paper: #e9e3d3;               // AI 回答内容面(暖纸色)
+  --paper-ink: #2a2620;           // paper 上的正文色(墨)
+  --brass: #c29a3b;               // 唯一强调: 来源/置信章/激活态/发送
+  --brass-hover: #d4aa47;
+  --brass-soft: rgba(194, 154, 59, 0.16);
+  --ink-text: #d6d1c4;            // 暖白正文
+  --muted: #8f877a;               // 次级文字
+  --hairline: rgba(214, 209, 196, 0.1);  // 细分割线
+
+  // 语义色(降饱和, 不与黄铜抢)
+  --danger: #c2665a;
+  --success: #6f9f6a;
+  --warning: #c7a24a;
+
+  // 字体
+  --font-display: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'SimSun', serif;
+  --font-body: 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+
+  // 圆角 / 阴影
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-elevated: 0 14px 44px rgba(0, 0, 0, 0.5);
+
+  // ---- 旧 token 名向后兼容(避免组件遗漏引用导致样式失效) ----
+  --bg-primary: var(--ink);
+  --bg-secondary: var(--surface);
+  --bg-tertiary: var(--surface-2);
+  --accent: var(--brass);
+  --accent-hover: var(--brass-hover);
+  --accent-soft: var(--brass-soft);
+  --text-primary: var(--ink-text);
+  --text-secondary: var(--muted);
+  --border-color: var(--hairline);
+}
+
+// ---------- 重置 ----------
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--ink);
+  color: var(--ink-text);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--brass);
+  text-decoration: none;
+}
+
+::selection {
+  background: var(--brass-soft);
+}
+
+// ---------- 滚动条 ----------
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(214, 209, 196, 0.14);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(214, 209, 196, 0.26);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(214, 209, 196, 0.18) transparent;
+}
+
+// ============================================================
+// Element Plus 暗色主题变量映射到本设计语言
+// ============================================================
+html.dark {
+  --el-color-primary: var(--brass);
+  --el-color-primary-light-3: var(--brass-hover);
+  --el-color-primary-dark-2: var(--brass);
+  --el-bg-color: var(--surface);
+  --el-bg-color-page: var(--ink);
+  --el-bg-color-overlay: var(--surface-2);
+  --el-text-color-primary: var(--ink-text);
+  --el-text-color-regular: var(--ink-text);
+  --el-text-color-secondary: var(--muted);
+  --el-border-color: var(--hairline);
+  --el-border-color-light: var(--hairline);
+  --el-border-color-lighter: var(--hairline);
+  --el-fill-color: rgba(214, 209, 196, 0.05);
+  --el-fill-color-blank: var(--surface);
+  --el-fill-color-light: rgba(214, 209, 196, 0.08);
+  --el-fill-color-lighter: rgba(214, 209, 196, 0.05);
+  --el-mask-color: rgba(0, 0, 0, 0.6);
+  // 语义按钮色映射到降饱和色板(删除/通过/驳回等)
+  --el-color-danger: var(--danger);
+  --el-color-success: var(--success);
+  --el-color-warning: var(--warning);
+  --el-color-error: var(--danger);
+}
+
+// ============================================================
+// 工具类
+// ============================================================
+
+// 流式打字光标(黄铜)
+.typing-cursor::after {
+  content: '▍';
+  margin-left: 2px;
+  color: var(--brass);
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+// 渐入动画
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+// ============================================================
+// ElMessageBox 全局优化
+// ============================================================
+.el-overlay-message-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: left;
+
+  &::after {
+    display: none;
+  }
+
+  .el-message-box {
+    display: block;
+    vertical-align: baseline;
+  }
+}
+
+.confirm-box {
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  padding: 20px 24px;
+  border-radius: var(--radius-md);
+
+  .el-message-box__header {
+    padding-bottom: 12px;
+
+    .el-message-box__title {
+      font-size: 16px;
+      font-weight: 600;
+    }
+  }
+
+  .el-message-box__content {
+    padding: 8px 0 16px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+
+  .el-message-box__btns {
+    padding-top: 4px;
+
+    .el-button {
+      border-radius: var(--radius-sm);
+      padding: 8px 18px;
+    }
+  }
+}

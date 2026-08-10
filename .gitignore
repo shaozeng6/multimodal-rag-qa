@@ -1,0 +1,47 @@
+# ==================== Python ====================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ==================== 环境变量与密钥（永不提交，.env.example 模板除外） ====================
+.env
+.env.*
+!.env.example
+
+# ==================== 运行时数据 ====================
+backend/uploads/
+backend/ingest_output/
+backend/ingest_tmp/
+*.log
+
+# ==================== Node / 前端 ====================
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
+
+# ==================== IDE / 本地工具 ====================
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+
+# ==================== 本地备份与私有开发文档（不进入公共仓库） ====================
+backend_backup_*/
+.claude/
+.trae/
+KNOWN_ISSUES.md
+PROJECT_AUDIT_*.md
+PROJECT_REVIEW_*.md
+PROJECT_FLOW.md
+理解 Pydantic model_config.md

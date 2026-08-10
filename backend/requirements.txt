@@ -1,0 +1,30 @@
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+sqlalchemy[asyncio]>=2.0.0
+aiomysql>=0.2.0
+pymysql>=1.2.0  # 入库管道 sync_db 的同步引擎(schema_v2 从 _vendor 移除后必须显式声明)
+pyjwt>=2.8.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.0.1,<4.1  # pin: bcrypt 4.1+ 与 passlib 1.7.4 不兼容(无维护的 __about__ 属性)
+python-multipart>=0.0.6
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+redis>=5.0.0
+langgraph>=0.2.0
+langgraph-checkpoint-redis>=2.0.0
+pymilvus>=2.4.0
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0
+openai>=1.50.0
+dashscope>=1.20.0
+httpx>=0.25.0
+python-dotenv>=1.0.0
+loguru>=0.7.0
+
+# ---- 入库管道(Ingestion) ----
+PyMuPDF>=1.24.0
+Pillow>=10.0.0
+langchain-text-splitters>=0.3.0
+langchain-experimental>=0.3.0
+tqdm>=4.66.0

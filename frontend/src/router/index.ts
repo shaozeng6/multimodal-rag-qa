@@ -1,0 +1,61 @@
+import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+
+const routes: RouteRecordRaw[] = [
+  {
+    path: '/',
+    redirect: '/chat',
+  },
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('@/views/Login.vue'),
+    meta: { requiresAuth: false },
+  },
+  {
+    path: '/chat',
+    name: 'chat',
+    component: () => import('@/views/Chat.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/knowledge',
+    name: 'knowledge',
+    component: () => import('@/views/Knowledge.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
+]
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
+})
+
+// 全局前置守卫: 未登录跳转 /login, 非管理员访问受限页面跳转 /chat
+router.beforeEach(async (to) => {
+  const auth = useAuthStore()
+
+  // 已登录但尚未加载用户信息(如刷新页面后), 先拉取一次
+  if (auth.isLoggedIn && !auth.user) {
+    await auth.fetchUser()
+  }
+
+  // 已登录用户访问登录页 -> 跳转聊天
+  if (to.path === '/login' && auth.isLoggedIn) {
+    return { path: '/chat' }
+  }
+
+  // 需要认证但未登录 -> 跳转登录页
+  if (to.meta.requiresAuth && !auth.isLoggedIn) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+
+  // 需要管理员角色但当前用户非管理员 -> 跳转聊天
+  if (to.meta.requiresAdmin && !auth.isAdmin) {
+    return { path: '/chat' }
+  }
+
+  return true
+})
+
+export default router
