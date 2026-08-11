@@ -159,6 +159,7 @@ const stampLabel = computed(() => {
           @click="handleMarkdownClick"
         ></div>
         <div v-else-if="streaming" class="typing-cursor placeholder-dot"></div>
+        <div v-else-if="isHuman && previewList.length" class="empty-content">[图片]</div>
         <div v-else class="empty-content">（无内容）</div>
 
         <!-- 引用证据区(方案B): 仅 AI 消息展示回答引用的来源(图片缩略图 + 文本来源卡片) -->

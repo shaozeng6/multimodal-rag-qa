@@ -98,13 +98,17 @@ export const useChatStore = defineStore("chat", () => {
     messages.value = [];
     try {
       const history = await getSessionMessages(id);
-      // 方案B: 历史 AI 消息存的 images(持久化的证据图 URL)还原为 evidence, 供证据区渲染
+      // 方案B: 历史 AI 消息优先用后端返回的 evidence(含文本来源+引用索引, 可跳转);
+      // 老消息没有则用 images(持久化的证据图 URL)回退还原为图片证据
       messages.value = history.map((m) => {
-        if (m.role === "ai" && m.images?.length) {
-          return {
-            ...m,
-            evidence: m.images.map((url) => ({ url, filename: filenameFromUrl(url), type: "image" })),
-          };
+        if (m.role === "ai") {
+          if (m.evidence?.length) return m;
+          if (m.images?.length) {
+            return {
+              ...m,
+              evidence: m.images.map((url) => ({ url, filename: filenameFromUrl(url), type: "image" })),
+            };
+          }
         }
         return m;
       });

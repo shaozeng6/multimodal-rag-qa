@@ -18,7 +18,11 @@ from services.session_service import (
     delete_session,
     rename_session,
 )
-from services.message_service import list_messages, list_message_images
+from services.message_service import (
+    list_messages,
+    list_message_images,
+    list_message_evidence,
+)
 
 router = APIRouter(prefix="/sessions", tags=["会话"])
 
@@ -64,6 +68,8 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     images: List[str] = []
+    # 引用证据(方案B, AI 消息): 历史回放还原证据区; 老消息无则 None
+    evidence: Optional[List[dict]] = None
     created_at: Optional[datetime] = None
 
 
@@ -128,12 +134,15 @@ async def get_session_messages(
     messages = await list_messages(session_id)
     # schema_v2: 图片从 message_images 读取(存引用, 按消息分组)
     images_by_msg = await list_message_images(session_id)
+    # 方案B: 引用证据从 message_traces.evidence 读取(历史回放还原证据区)
+    evidence_by_msg = await list_message_evidence(session_id)
     return [
         MessageResponse(
             id=m.id,
             role=m.role,
             content=m.content or "",
             images=images_by_msg.get(m.id, []),
+            evidence=evidence_by_msg.get(m.id),
             created_at=m.created_at,
         )
         for m in messages

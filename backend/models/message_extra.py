@@ -68,4 +68,6 @@ class MessageTrace(Base):
     evaluate_score = Column(Float)
     human_answer = Column(String(10))
     duration_ms = Column(Integer)
+    # 引用证据(方案B): 回答引用的来源(图片/文本), 供历史回放还原证据区; 只写不回流
+    evidence = Column(JSON)
     created_at = Column(DateTime, default=datetime.now)

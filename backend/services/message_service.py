@@ -22,7 +22,7 @@ from services.image_store import resolve_image_url
 _TRACE_COLUMNS = {
     "input_text", "modality", "image_caption", "image_relation", "rewritten_query",
     "sub_questions", "kb_context", "kb_images", "retrieval_ok",
-    "evaluate_score", "human_answer", "duration_ms",
+    "evaluate_score", "human_answer", "duration_ms", "evidence",
 }
 
 
@@ -93,4 +93,35 @@ async def list_message_images(session_id: str) -> Dict[int, List[str]]:
             url = resolve_image_url(image_ref)
             if url:
                 grouped.setdefault(message_id, []).append(url)
+        return grouped
+
+
+async def list_message_evidence(session_id: str) -> Dict[int, list]:
+    """按消息分组返回引用证据(message_id -> evidence 列表)。
+
+    供历史回放还原证据区: 入库的 evidence 里图片 image_path 是本地路径,
+    统一经 resolve_image_url 映射为前端可加载 URL; 文本来源原样返回。
+    """
+    async with async_session_maker() as db:
+        result = await db.execute(
+            select(MessageTrace.evidence, Message.id)
+            .join(Message, Message.id == MessageTrace.message_id)
+            .where(Message.session_id == session_id)
+        )
+        grouped: Dict[int, list] = {}
+        for evidence, message_id in result.all():
+            if not evidence:
+                continue
+            items = []
+            for e in evidence:
+                item = dict(e)
+                if item.get("type") != "text" and item.get("image_path"):
+                    url = resolve_image_url(item["image_path"])
+                    if not url:
+                        continue
+                    item["url"] = url
+                    item.pop("image_path", None)
+                items.append(item)
+            if items:
+                grouped[message_id] = items
         return grouped

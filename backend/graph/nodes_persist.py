@@ -47,6 +47,8 @@ def _build_trace(state: MultiModalRAGState, duration_ms: Optional[int]) -> dict:
         "evaluate_score": state.get("evaluate_score"),
         "human_answer": state.get("human_answer") or "",
         "duration_ms": duration_ms,
+        # 引用证据(原始 image_path, 供历史回放时 resolve 成 URL)
+        "evidence": state.get("evidence") or [],
     }
 
 
