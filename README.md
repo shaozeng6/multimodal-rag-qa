@@ -35,6 +35,7 @@ A multimodal Retrieval-Augmented Generation (RAG) Q&A system built on **FastAPI 
 - **LLM-as-Judge 评估与人工审批**:独立评审模型打分(消除自评偏置),低于 `EVALUATE_THRESHOLD` 的回答进入人工审批,可审批通过或驳回重生成。
 - **上下文管理**:多轮滑动窗口 + 超长自动摘要压缩;跨会话记忆检索(`t_context`),仅高质量回答进入记忆。
 - **入库管道**:PDF 解析(PyMuPDF)+ vllm `dots_ocr` 图像 OCR + 智能分块 + 多模态向量化,MySQL + Milvus 双库写入,异步任务 + 进度查询。
+- **知识库管理**:管理页支持上传 PDF、任务进度轮询、已入库文档列表(搜索 / 分页)、点击文档下钻查看 chunk 明细、删除文档(按 Milvus 主键精确删,同名重复上传互不影响)。
 - **可观测性**:SSE 流式输出 + 节点执行链路可视化;`turn_trace` 全链路中间过程落库(`message_traces`),只写不回流,可审计、可回放。
 
 ## 系统架构
@@ -190,6 +191,9 @@ npm run dev               # http://localhost:5173
 | GET | `/knowledge/jobs` | 入库任务列表 |
 | GET | `/knowledge/jobs/{id}` | 入库任务状态 |
 | GET | `/knowledge/status` | 知识库统计(文档数 / 向量数) |
+| GET | `/knowledge/documents` | 已入库文档分页列表(搜索 / 分页) |
+| GET | `/knowledge/documents/{id}/chunks` | 某文档的 chunk 明细(文本 / 图片) |
+| DELETE | `/knowledge/documents/{id}` | 删除文档(含 Milvus 向量与磁盘产物) |
 | GET | `/files` | 图片服务(带路径穿越校验) |
 | GET | `/health` | 健康检查 |
 
