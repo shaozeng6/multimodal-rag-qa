@@ -57,14 +57,21 @@ def _build_system_prompt(summary: str, kb_context: list, image_relation: str) ->
     return system_prompt
 
 
+# 纯图轮默认指令: 用户只发图不带字时, 模型拿到一张图需明确任务
+_PURE_IMAGE_HINT = "请描述这张图片, 并说明它表达了什么含义。"
+
+
 def _build_user_content(input_text: str, input_image: str) -> list:
     """组装当前输入的用户消息块: 文本 + 用户发的图(image_url)。
 
+    纯图轮(无文字)补默认指令, 否则模型拿到图不知道该做什么;
     方案B: 检索图不进模型, 知识库图片以 [图片] doc 文本作答; 仅当前输入图进模型。
     """
     content: list = []
     if input_text:
         content.append({"type": "text", "text": input_text})
+    elif input_image:
+        content.append({"type": "text", "text": _PURE_IMAGE_HINT})
     url = _image_to_model_url(input_image)
     if url:
         content.append({"type": "image_url", "image_url": {"url": url}})
