@@ -45,3 +45,6 @@ PROJECT_AUDIT_*.md
 PROJECT_REVIEW_*.md
 PROJECT_FLOW.md
 理解 Pydantic model_config.md
+
+# 旧项目迁移的一次性工具(不属公开功能)
+backend/ingestion/backfill_documents.py

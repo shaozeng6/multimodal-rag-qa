@@ -5,7 +5,7 @@ schema_v2 规范化: 入库任务从 in-memory dict 持久化到 MySQL, 重启�
 """
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, BigInteger, String, Enum, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, Enum, Text, DateTime, ForeignKey, JSON
 
 from db.mysql import Base
 
@@ -49,6 +49,8 @@ class KnowledgeDocument(Base):
     status = Column(Enum("ingested", "partial", "failed", "deleted"), default="ingested")
     chunk_count = Column(Integer, default=0)
     image_count = Column(Integer, default=0)
+    # Milvus t_doc 主键列表(insert 返回的 ids): 按文档精确删除用; 存量数据为 NULL
+    milvus_ids = Column(JSON, nullable=True)
     file_md5 = Column(String(32), index=True)  # 源文件去重
     uploaded_by = Column(
         Integer,

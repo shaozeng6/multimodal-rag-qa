@@ -84,9 +84,9 @@ def run_ingestion(
     ok_count = len(processed)
     logger.info("[入库] 向量化完成: {}/{} 条成功", ok_count, len(items))
 
-    # ⑤ 入库
+    # ⑤ 入库, 拿回 Milvus 主键 ids(供文档级精确删除)
     update_job(job_id, stage="写入 Milvus")
-    write_to_milvus(processed)
+    insert_ids = write_to_milvus(processed)
 
     # ⑥ 记录文档元数据(schema_v2): 与 Milvus chunk 对应的文档级记录
     image_count = sum(1 for it in items if it.get("image_path"))
@@ -98,6 +98,7 @@ def run_ingestion(
         chunk_count=len(processed),
         image_count=image_count,
         status="ingested",
+        milvus_ids=insert_ids,
     )
 
     logger.info("[入库] 管道完成: 共 {} 条, 向量化成功 {} 条", len(processed), ok_count)

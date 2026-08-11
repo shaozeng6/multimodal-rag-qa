@@ -45,8 +45,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-async def _ensure_trace_column(conn, column: str, ddl: str) -> None:
-    """迁移: 已有 message_traces 表缺指定列时自动补齐。
+async def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
+    """迁移: 已有表缺指定列时自动补齐。
 
     create_all 只建新表、不给已有表加列; schema_v2.sql 里的 ALTER 是注释。
     启动时检查 information_schema, 缺列则 ALTER, 幂等可重复执行。
@@ -55,33 +55,44 @@ async def _ensure_trace_column(conn, column: str, ddl: str) -> None:
         result = await conn.execute(
             text(
                 "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
-                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message_traces' "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tbl "
                 "AND COLUMN_NAME = :col"
             ),
-            {"col": column},
+            {"tbl": table, "col": column},
         )
         if result.first() is None:
             await conn.execute(text(ddl))
-            logger.info("迁移: message_traces 已补齐 {} 列", column)
+            logger.info("迁移: {} 已补齐 {} 列", table, column)
         else:
-            logger.info("迁移: message_traces.{} 列已存在, 跳过", column)
+            logger.info("迁移: {}.{} 列已存在, 跳过", table, column)
     except Exception as e:
-        logger.warning("检查/补齐 {} 列失败(忽略, 若表不存在会由 create_all 兜底): {}", column, e)
+        logger.warning("检查/补齐 {}.{} 列失败(忽略, 若表不存在会由 create_all 兜底): {}",
+                       table, column, e)
 
 
 async def _ensure_trace_columns(conn) -> None:
     """补齐 message_traces 随版本新增的列。"""
-    await _ensure_trace_column(
-        conn, "modality",
+    await _ensure_column(
+        conn, "message_traces", "modality",
         "ALTER TABLE message_traces "
         "ADD COLUMN modality VARCHAR(20) NULL "
         "COMMENT '输入模态 text/image/text_image' AFTER input_text",
     )
-    await _ensure_trace_column(
-        conn, "evidence",
+    await _ensure_column(
+        conn, "message_traces", "evidence",
         "ALTER TABLE message_traces "
         "ADD COLUMN evidence JSON NULL "
         "COMMENT 'AI回答的引用证据(图片/文本来源), 供历史回放还原证据区' AFTER duration_ms",
+    )
+
+
+async def _ensure_knowledge_columns(conn) -> None:
+    """补齐 knowledge_documents 随版本新增的列。"""
+    await _ensure_column(
+        conn, "knowledge_documents", "milvus_ids",
+        "ALTER TABLE knowledge_documents "
+        "ADD COLUMN milvus_ids JSON NULL "
+        "COMMENT 'Milvus t_doc 主键列表, 按文档精确删除用' AFTER image_count",
     )
 
 
@@ -101,6 +112,7 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
         logger.info("数据库表已创建(若不存在)")
         await _ensure_trace_columns(conn)
+        await _ensure_knowledge_columns(conn)
 
     # 插入初始 admin 账号
     async with async_session_maker() as session:

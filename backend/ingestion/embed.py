@@ -55,11 +55,15 @@ def process_item(item: Dict) -> Optional[Dict]:
     return new_item
 
 
-def write_to_milvus(processed_data: List[Dict]) -> None:
-    """写入 Milvus t_doc_collection。"""
+def write_to_milvus(processed_data: List[Dict]) -> List[int]:
+    """写入 Milvus t_doc_collection, 返回插入实体的主键 ids(供文档级精确删除)。
+
+    返回空列表表示无可写数据/未插入。ids 由 pipeline 传给 record_document 持久化,
+    删除文档时按主键精确删, 同名重复上传互不影响。
+    """
     if not processed_data:
         logger.warning("[入库] 无可写数据")
-        return
+        return []
     # 防御: 剔除无向量项, 避免空向量令整批插入失败(与 process_item 契约一致)
     items = [it for it in processed_data if it.get("dense")]
     skipped = len(processed_data) - len(items)
@@ -67,7 +71,79 @@ def write_to_milvus(processed_data: List[Dict]) -> None:
         logger.warning("[入库] 剔除 {} 条无向量项, 实际写入 {} 条", skipped, len(items))
     if not items:
         logger.warning("[入库] 无可写向量项")
-        return
+        return []
     result = milvus_client.insert(collection_name=COLLECTION_NAME, data=items)
+    ids = list(result.get('ids') or [])
     logger.info("[入库] Milvus 插入 {} 条, IDs 示例: {}",
-                result.get('insert_count', 0), (result.get('ids') or [])[:5])
+                result.get('insert_count', 0), ids[:5])
+    return ids
+
+
+def delete_milvus_by_ids(ids: List[int]) -> int:
+    """按主键删除 Milvus 实体(精确, 幂等: 不存在的 id 不报错)。"""
+    if not ids:
+        return 0
+    result = milvus_client.delete(collection_name=COLLECTION_NAME, ids=ids)
+    return int(result.get('delete_count', 0) or 0)
+
+
+def query_milvus_ids_by_filename(filename: str) -> List[int]:
+    """legacy 兜底: 按 filename 查询 Milvus 实体主键(供 milvus_ids 为 NULL 的存量文档删除)。
+
+    仅当该 filename 在 knowledge_documents 中唯一时才由调用方放行(否则同名多文档会误删)。
+    """
+    try:
+        expr = 'filename == "{}"'.format(filename.replace('"', ""))
+        hits = milvus_client.query(
+            collection_name=COLLECTION_NAME,
+            filter=expr,
+            output_fields=["id"],
+        )
+        return [int(h.get("id")) for h in hits if h.get("id") is not None]
+    except Exception as e:
+        logger.warning("[Milvus] 按 filename 查询 ids 失败: {}", e)
+        return []
+
+
+def _chunk_to_dict(h: dict) -> dict:
+    """Milvus 命中实体 → chunk 展示 dict(image_path 由调用方 resolve 成 URL)。"""
+    return {
+        "id": h.get("id"),
+        "text": h.get("text") or "",
+        "category": h.get("category") or "unknown",
+        "image_path": h.get("image_path") or None,
+        "title": h.get("title") or "",
+    }
+
+
+def query_milvus_chunks_by_ids(ids: List[int]) -> List[dict]:
+    """按主键查 chunk 明细, 保持 milvus_ids 的插入顺序(供文档 chunk 查看)。"""
+    if not ids:
+        return []
+    expr = "id in [{}]".format(",".join(str(int(i)) for i in ids))
+    try:
+        hits = milvus_client.query(
+            collection_name=COLLECTION_NAME,
+            filter=expr,
+            output_fields=["id", "text", "category", "image_path", "title"],
+        )
+    except Exception as e:
+        logger.warning("[Milvus] 按 ids 查 chunk 失败: {}", e)
+        return []
+    id_to_hit = {h.get("id"): _chunk_to_dict(h) for h in hits}
+    return [id_to_hit[i] for i in ids if i in id_to_hit]
+
+
+def query_milvus_chunks_by_filename(filename: str) -> List[dict]:
+    """legacy 兜底: 按 filename 查 chunk 明细(展示用, 同名多文档会并集)。"""
+    try:
+        expr = 'filename == "{}"'.format(filename.replace('"', ""))
+        hits = milvus_client.query(
+            collection_name=COLLECTION_NAME,
+            filter=expr,
+            output_fields=["id", "text", "category", "image_path", "title"],
+        )
+    except Exception as e:
+        logger.warning("[Milvus] 按 filename 查 chunk 失败: {}", e)
+        return []
+    return [_chunk_to_dict(h) for h in hits]
