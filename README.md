@@ -124,6 +124,12 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8001
 ```
 
+> **首次部署需初始化 Milvus 集合**(幂等,已存在则跳过;`--force` 删除重建会清空数据):
+>
+> ```bash
+> cd backend && python -m db.milvus_setup
+> ```
+
 ### 前端启动
 
 ```bash
