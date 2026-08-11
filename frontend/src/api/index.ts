@@ -36,10 +36,23 @@ api.interceptors.request.use(
   (error) => Promise.reject(error),
 )
 
-// 响应拦截: 401 时清除凭证并跳转登录页
+// 响应拦截: 归一化错误信息 + 401 时清除凭证并跳转登录页
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // 后端 FastAPI 错误体固定为 {detail}, 未做统一包裹层
+    // 这里把它提取到 error.message, 页面 catch 里读 err.message 即得后端真实文案
+    const data = error?.response?.data
+    if (data?.detail) {
+      if (typeof data.detail === 'string') {
+        // HTTPException 的错误文案, 如 "用户名或密码错误"
+        error.message = data.detail
+      } else if (Array.isArray(data.detail) && data.detail.length) {
+        // 422 参数校验错误, detail 是 {loc, msg, type} 数组
+        error.message = data.detail[0]?.msg || JSON.stringify(data.detail)
+      }
+    }
+
     const status = error?.response?.status
     if (status === 401) {
       clearToken()
