@@ -34,6 +34,12 @@ async function handleLogin(): Promise<void> {
     loading.value = true;
     try {
       await auth.login({ username: form.username, password: form.password });
+      // P0: 首登/初始密码用户先强制改密
+      if (auth.mustChangePassword) {
+        ElMessage.warning('请先修改初始密码');
+        router.replace('/change-password');
+        return;
+      }
       ElMessage.success('登录成功');
       // 优先跳转到 redirect 参数指向的页面
       const redirect = (route.query.redirect as string) || '/chat';

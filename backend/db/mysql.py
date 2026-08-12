@@ -45,11 +45,12 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-async def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
+async def _ensure_column(conn, table: str, column: str, ddl: str) -> bool:
     """迁移: 已有表缺指定列时自动补齐。
 
     create_all 只建新表、不给已有表加列; schema_v2.sql 里的 ALTER 是注释。
     启动时检查 information_schema, 缺列则 ALTER, 幂等可重复执行。
+    Returns: 是否本次新增了该列(调用方可据此做一次性数据迁移)。
     """
     try:
         result = await conn.execute(
@@ -63,11 +64,13 @@ async def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
         if result.first() is None:
             await conn.execute(text(ddl))
             logger.info("迁移: {} 已补齐 {} 列", table, column)
-        else:
-            logger.info("迁移: {}.{} 列已存在, 跳过", table, column)
+            return True
+        logger.info("迁移: {}.{} 列已存在, 跳过", table, column)
+        return False
     except Exception as e:
         logger.warning("检查/补齐 {}.{} 列失败(忽略, 若表不存在会由 create_all 兜底): {}",
                        table, column, e)
+        return False
 
 
 async def _ensure_trace_columns(conn) -> None:
@@ -135,6 +138,22 @@ async def _ensure_ingest_columns(conn) -> None:
     )
 
 
+async def _ensure_user_columns(conn) -> None:
+    """users 表新增列: must_change_password(首登强制改密)。
+
+    存量安装补齐该列时, 把现有 admin 一并标记强制改密(此前一直用默认 admin123, 需立即更换)。
+    标记只在"列刚新增"这一次执行, 之后重启不会反复强制。
+    """
+    added = await _ensure_column(
+        conn, "users", "must_change_password",
+        "ALTER TABLE users ADD COLUMN must_change_password TINYINT(1) DEFAULT 0 "
+        "COMMENT '首次登录是否强制改密' AFTER role",
+    )
+    if added:
+        await conn.execute(text("UPDATE users SET must_change_password = 1 WHERE username = 'admin'"))
+        logger.info("迁移: 存量 admin 已标记强制改密")
+
+
 async def _ensure_ingest_status_enum(conn) -> None:
     """ingest_jobs.status Enum 追加 cancelled(MySQL 无 ADD ENUM VALUE, 需整列 MODIFY)。"""
     result = await conn.execute(text(
@@ -171,6 +190,7 @@ async def init_db() -> None:
         await _ensure_knowledge_columns(conn)
         await _ensure_ingest_columns(conn)
         await _ensure_ingest_status_enum(conn)
+        await _ensure_user_columns(conn)
 
     # 配置中心: sys_config 表空则写默认值种子, 并载入内存缓存(懒加载兜底, 幂等)
     from services import config_service  # noqa: WPS433
@@ -186,6 +206,7 @@ async def init_db() -> None:
                 username="admin",
                 password_hash=pwd_context.hash("admin123"),
                 role="admin",
+                must_change_password=True,  # P0: 首登强制改密, 避免默认凭据长期生效
             )
             session.add(admin_user)
             await session.commit()

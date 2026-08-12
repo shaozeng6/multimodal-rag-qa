@@ -19,6 +19,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/change-password',
+    name: 'change-password',
+    component: () => import('@/views/ChangePassword.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/knowledge',
     name: 'knowledge',
     component: () => import('@/views/Knowledge.vue'),
@@ -48,6 +54,11 @@ router.beforeEach(async (to) => {
   // 需要认证但未登录 -> 跳转登录页
   if (to.meta.requiresAuth && !auth.isLoggedIn) {
     return { path: '/login', query: { redirect: to.fullPath } };
+  }
+
+  // P0: 需先改密(首登强制) → 除改密页外一律拦截到改密页, 改完才能进系统
+  if (auth.isLoggedIn && auth.user?.must_change_password && to.path !== '/change-password') {
+    return { path: '/change-password' };
   }
 
   // 需要管理员角色但当前用户非管理员 -> 跳转聊天

@@ -1,6 +1,12 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import { login as loginApi, getUserInfo, type UserInfo, type LoginParams } from '@/api/auth';
+import {
+  login as loginApi,
+  getUserInfo,
+  changePassword as changePasswordApi,
+  type UserInfo,
+  type LoginParams,
+} from '@/api/auth';
 import { getToken, setToken, clearToken } from '@/api/index';
 
 /**
@@ -17,6 +23,9 @@ export const useAuthStore = defineStore('auth', () => {
 
   // 是否为管理员
   const isAdmin = computed(() => user.value?.role === 'admin');
+
+  // 是否需要先改密(首登强制改密; 为 true 时前端拦截到改密页)
+  const mustChangePassword = computed(() => !!user.value?.must_change_password);
 
   /**
    * 登录: 调用后端接口, 成功后持久化 token
@@ -51,6 +60,14 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
+   * 修改密码: 成功后更新用户信息(清除强制改密标记)
+   */
+  async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
+    const updated = await changePasswordApi(oldPassword, newPassword);
+    user.value = updated;
+  }
+
+  /**
    * 登出: 清除 token 与用户信息
    */
   function logout(): void {
@@ -64,8 +81,10 @@ export const useAuthStore = defineStore('auth', () => {
     user,
     isLoggedIn,
     isAdmin,
+    mustChangePassword,
     login,
     fetchUser,
+    changePassword,
     logout,
   };
 });

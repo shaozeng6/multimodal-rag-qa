@@ -77,4 +77,15 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+# P0 安全: JWT 签名密钥不允许缺省或用占位默认值, 否则拒绝启动(避免默认凭据上线)
+_JWT_PLACEHOLDERS = {"", "your-secret-key-change-in-production", "change-me-in-production"}
+if settings.JWT_SECRET in _JWT_PLACEHOLDERS:
+    raise RuntimeError(
+        "JWT_SECRET 仍为默认占位值: 请在 .env 设置一个足够随机的密钥后重启, "
+        "生产环境建议用 `python -c \"import secrets; print(secrets.token_hex(32))\"` 生成"
+    )
+if len(settings.JWT_SECRET) < 16:
+    # 非默认但过短: 不强拦(避免打断已有开发环境), 但提醒
+    logger.warning("JWT_SECRET 长度不足 16 字符, 存在被暴力破解风险, 建议使用 secrets.token_hex(32) 生成更强密钥")
+
 logger.info("应用配置加载完成: MYSQL_URL={}", settings.MYSQL_URL)
