@@ -1,98 +1,100 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
-import { Picture, Promotion, Close } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ref, computed, nextTick } from 'vue';
+import { Picture, Promotion, Close } from '@element-plus/icons-vue';
+import { ElMessage } from 'element-plus';
 
 const props = defineProps<{
-  disabled?: boolean
-}>()
+  disabled?: boolean;
+}>();
 
 const emit = defineEmits<{
-  (e: 'send', text: string, image: string | null): void
-}>()
+  (e: 'send', text: string, image: string | null): void;
+}>();
 
-const text = ref('')
-const imageBase64 = ref<string | null>(null)
-const fileInput = ref<HTMLInputElement | null>(null)
-const textareaRef = ref<HTMLTextAreaElement | null>(null)
+const text = ref('');
+const imageBase64 = ref<string | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
+const textareaRef = ref<HTMLTextAreaElement | null>(null);
 
 // 是否可发送
-const canSend = computed(() => !props.disabled && (text.value.trim().length > 0 || !!imageBase64.value))
+const canSend = computed(
+  () => !props.disabled && (text.value.trim().length > 0 || !!imageBase64.value),
+);
 
 /** 触发图片选择 */
 function triggerUpload(): void {
-  fileInput.value?.click()
+  fileInput.value?.click();
 }
 
 /** 处理图片选择, 转为 base64 */
 function handleFileChange(e: Event): void {
-  const target = e.target as HTMLInputElement
-  const file = target.files?.[0]
-  if (!file) return
+  const target = e.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
 
   // 限制图片大小(5MB)
-  const MAX_SIZE = 5 * 1024 * 1024
+  const MAX_SIZE = 5 * 1024 * 1024;
   if (file.size > MAX_SIZE) {
-    ElMessage.warning('图片大小不能超过 5MB')
-    target.value = ''
-    return
+    ElMessage.warning('图片大小不能超过 5MB');
+    target.value = '';
+    return;
   }
 
   if (!file.type.startsWith('image/')) {
-    ElMessage.warning('请选择图片文件')
-    target.value = ''
-    return
+    ElMessage.warning('请选择图片文件');
+    target.value = '';
+    return;
   }
 
-  const reader = new FileReader()
+  const reader = new FileReader();
   reader.onload = () => {
-    imageBase64.value = reader.result as string
-  }
+    imageBase64.value = reader.result as string;
+  };
   reader.onerror = () => {
-    ElMessage.error('图片读取失败')
-  }
-  reader.readAsDataURL(file)
+    ElMessage.error('图片读取失败');
+  };
+  reader.readAsDataURL(file);
   // 重置 input 以便重复选择同一文件
-  target.value = ''
+  target.value = '';
 }
 
 /** 移除已选图片 */
 function removeImage(): void {
-  imageBase64.value = null
+  imageBase64.value = null;
 }
 
 /** 发送消息 */
 function send(): void {
-  if (!canSend.value) return
-  const content = text.value.trim()
-  const img = imageBase64.value
-  emit('send', content, img)
+  if (!canSend.value) return;
+  const content = text.value.trim();
+  const img = imageBase64.value;
+  emit('send', content, img);
   // 清空输入
-  text.value = ''
-  imageBase64.value = null
+  text.value = '';
+  imageBase64.value = null;
   nextTick(() => {
-    autoResize()
-  })
+    autoResize();
+  });
 }
 
 /** 键盘事件: Enter 发送, Shift+Enter 换行 */
 function handleKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-    e.preventDefault()
-    send()
+    e.preventDefault();
+    send();
   }
 }
 
 /** 文本框高度自适应 */
 function autoResize(): void {
-  const el = textareaRef.value
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 160) + 'px'
+  const el = textareaRef.value;
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
 }
 
 function handleInput(): void {
-  autoResize()
+  autoResize();
 }
 </script>
 
@@ -253,11 +255,11 @@ function handleInput(): void {
   width: 36px;
   border: none;
   background: var(--brass);
-  color: #1b1814;
+  color: #ffffff;
 
   &:hover {
     background: var(--brass-hover);
-    color: #1b1814;
+    color: #ffffff;
   }
 
   &.is-disabled {

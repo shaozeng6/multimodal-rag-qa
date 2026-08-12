@@ -5,18 +5,18 @@
 """
 import time
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
 
-from graph.state import MultiModalRAGState
 from graph.context import get_working_window
 from graph.llm_init import multiModal_llm
 from graph.nodes_shared import (
     _CATEGORY_LABELS,
-    _image_to_model_url,
     _extract_evidence,
+    _image_to_model_url,
 )
+from graph.state import MultiModalRAGState
 
 
 def _build_system_prompt(summary: str, kb_context: list, image_relation: str) -> str:

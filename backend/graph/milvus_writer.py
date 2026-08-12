@@ -11,9 +11,9 @@ from loguru import logger
 from pymilvus import MilvusClient
 
 from graph.llm_init import (
+    CONTEXT_COLLECTION_NAME,
     embedding,
     milvus_client,
-    CONTEXT_COLLECTION_NAME,
 )
 
 # 全局线程池用于异步操作

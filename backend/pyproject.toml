@@ -1,0 +1,30 @@
+[project]
+name = "multimodal-rag-enterprise-backend"
+version = "1.0.0"
+description = "多模态 RAG 知识库问答系统企业版后端"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "backup",
+    "*.bak",
+    "dots_ocr",  # 第三方 vendored OCR 库, 不纳入本项目 lint
+]
+
+[tool.ruff.lint]
+# E: pycodestyle 错误(可读性) / F: pyflakes(未使用导入、未定义名、常见 bug) / I: isort(导入排序) / W: 警告
+# 说明: 代码含大量中文注释与长行, 行长(E501)放宽不查; 其余风格规则按需再加
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["api", "core", "db", "dots_ocr", "graph", "ingestion", "models", "services"]
+
+[tool.ruff.format]
+line-ending = "auto"

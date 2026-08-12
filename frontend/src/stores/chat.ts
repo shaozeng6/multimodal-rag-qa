@@ -1,5 +1,5 @@
-import { defineStore } from "pinia";
-import { ref, reactive } from "vue";
+import { defineStore } from 'pinia';
+import { ref, reactive } from 'vue';
 import {
   getSessions,
   createSession as createSessionApi,
@@ -7,20 +7,20 @@ import {
   renameSession as renameSessionApi,
   getSessionMessages,
   type Session,
-} from "@/api/sessions";
+} from '@/api/sessions';
 import {
   sendMessage as sendMessageSse,
   approveSession,
   type Message,
   type ChatEvent,
   type ApprovalPayload,
-} from "@/api/chat";
+} from '@/api/chat';
 
 /**
  * 聊天状态 Store
  * 管理会话列表、当前会话、消息流, 以及 SSE 流式接收与审批拦截
  */
-export const useChatStore = defineStore("chat", () => {
+export const useChatStore = defineStore('chat', () => {
   const sessions = ref<Session[]>([]);
   const currentSessionId = ref<string | null>(null);
   const messages = ref<Message[]>([]);
@@ -29,8 +29,11 @@ export const useChatStore = defineStore("chat", () => {
   const loadingMessages = ref(false);
   const streaming = ref(false);
 
-  /** 执行链路: 记录当前请求经过的节点, 用于前端展示进度 */
-  const nodeSteps = ref<{ node: string; label: string }[]>([]);
+  /**
+   * 当前正在生成(或刚生成完)的 AI 消息 id。
+   * 执行链路 nodeSteps 挂在具体消息上(回答完成后仍保留), 用 activeAiId 定位要展示链路的消息。
+   */
+  const activeAiId = ref<string | null>(null);
 
   // 命中审批拦截时携带的负载, 非空则由 Chat.vue 弹出审批弹窗
   const pendingApproval = ref<ApprovalPayload | null>(null);
@@ -47,13 +50,13 @@ export const useChatStore = defineStore("chat", () => {
   function filenameFromUrl(url: string): string {
     try {
       const u = new URL(url, window.location.origin);
-      if (u.pathname === "/api/files" && u.searchParams.has("path")) {
-        const p = decodeURIComponent(u.searchParams.get("path") || "");
-        return p.split(/[\\/]/).filter(Boolean).pop() || "图";
+      if (u.pathname === '/api/files' && u.searchParams.has('path')) {
+        const p = decodeURIComponent(u.searchParams.get('path') || '');
+        return p.split(/[\\/]/).filter(Boolean).pop() || '图';
       }
-      return decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() || "图");
+      return decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || '图');
     } catch {
-      return "图";
+      return '图';
     }
   }
 
@@ -87,6 +90,7 @@ export const useChatStore = defineStore("chat", () => {
     currentSessionId.value = id;
     currentSession.value = sessions.value.find((s) => s.id === id) || null;
     pendingApproval.value = null;
+    activeAiId.value = null; // 切换会话后不展示历史执行链路
     await loadMessages(id);
   }
 
@@ -101,12 +105,16 @@ export const useChatStore = defineStore("chat", () => {
       // 方案B: 历史 AI 消息优先用后端返回的 evidence(含文本来源+引用索引, 可跳转);
       // 老消息没有则用 images(持久化的证据图 URL)回退还原为图片证据
       messages.value = history.map((m) => {
-        if (m.role === "ai") {
+        if (m.role === 'ai') {
           if (m.evidence?.length) return m;
           if (m.images?.length) {
             return {
               ...m,
-              evidence: m.images.map((url) => ({ url, filename: filenameFromUrl(url), type: "image" })),
+              evidence: m.images.map((url) => ({
+                url,
+                filename: filenameFromUrl(url),
+                type: 'image',
+              })),
             };
           }
         }
@@ -146,22 +154,16 @@ export const useChatStore = defineStore("chat", () => {
     const updated = await renameSessionApi(id, title);
     const session = sessions.value.find((s) => s.id === id);
     if (session) session.title = updated.title;
-    if (currentSession.value?.id === id)
-      currentSession.value.title = updated.title;
+    if (currentSession.value?.id === id) currentSession.value.title = updated.title;
   }
 
   /**
    * 发送消息: 立即插入用户消息, 创建 AI 占位消息, 通过 SSE 流式接收回复
    */
-  async function sendMessage(
-    text: string,
-    image: string | null,
-  ): Promise<void> {
+  async function sendMessage(text: string, image: string | null): Promise<void> {
     // 无当前会话或会话已不在本地列表(可能已删除)时, 拒绝发送避免 404
     if (!currentSessionId.value || streaming.value) return;
-    const sessionExists = sessions.value.some(
-      (s) => s.id === currentSessionId.value,
-    );
+    const sessionExists = sessions.value.some((s) => s.id === currentSessionId.value);
     if (!sessionExists) {
       currentSessionId.value = null;
       currentSession.value = null;
@@ -172,7 +174,7 @@ export const useChatStore = defineStore("chat", () => {
     const userImages = image ? [image] : undefined;
     messages.value.push({
       id: tempId(),
-      role: "human",
+      role: 'human',
       content: text,
       images: userImages,
     });
@@ -182,23 +184,17 @@ export const useChatStore = defineStore("chat", () => {
     // 直接修改 aiMessage.content 不会触发 Vue 的 Proxy set trap, 导致打字机效果失效
     const aiMessage = reactive<Message>({
       id: tempId(),
-      role: "ai",
-      content: "",
+      role: 'ai',
+      content: '',
     });
     messages.value.push(aiMessage);
-
-    // 清空执行链路
-    nodeSteps.value = [];
+    // 指向本条 AI 消息, 执行链路(nodeSteps)挂在它上面, 回答完成后仍可查看
+    activeAiId.value = aiMessage.id;
     streaming.value = true;
     try {
-      await sendMessageSse(
-        currentSessionId.value,
-        text,
-        image,
-        (evt: ChatEvent) => {
-          handleEvent(evt, aiMessage);
-        },
-      );
+      await sendMessageSse(currentSessionId.value, text, image, (evt: ChatEvent) => {
+        handleEvent(evt, aiMessage);
+      });
     } catch (err) {
       aiMessage.content += `\n\n> ⚠️ 请求失败: ${err instanceof Error ? err.message : String(err)}`;
     } finally {
@@ -210,32 +206,29 @@ export const useChatStore = defineStore("chat", () => {
   function handleEvent(evt: ChatEvent, aiMessage: Message): void {
     const type = evt.event || evt.type;
     switch (type) {
-      case "token": {
+      case 'token': {
         // 流式 token, 追加到 AI 消息(打字效果)
-        if (typeof evt.content === "string") {
+        if (typeof evt.content === 'string') {
           aiMessage.content += evt.content;
         }
         break;
       }
-      case "node_update": {
-        // 节点完成: 记录到执行链路
+      case 'node_update': {
+        // 节点完成: 记录到本条 AI 消息的执行链路(回答完成后仍保留)
         if (evt.node && evt.label) {
-          nodeSteps.value.push({ node: evt.node, label: evt.label });
+          aiMessage.nodeSteps = aiMessage.nodeSteps || [];
+          aiMessage.nodeSteps.push({ node: evt.node, label: evt.label });
         }
         break;
       }
-      case "done": {
+      case 'done': {
         // 结束事件: 仅当未收到任何 token 时用完整文本兜底,
         // 避免已有流式内容被覆盖导致视觉闪烁
-        if (
-          typeof evt.text === "string" &&
-          evt.text &&
-          !aiMessage.content
-        ) {
+        if (typeof evt.text === 'string' && evt.text && !aiMessage.content) {
           aiMessage.content = evt.text;
         }
         // 附带评估置信分(0-100), 前端渲染"置信章"
-        if (typeof evt.score === "number") {
+        if (typeof evt.score === 'number') {
           aiMessage.score = evt.score;
         }
         // 方案B: 引用证据(被引用的知识库图片)
@@ -244,34 +237,31 @@ export const useChatStore = defineStore("chat", () => {
         }
         break;
       }
-      case "title_update": {
+      case 'title_update': {
         // 后端自动生成的会话标题,更新本地会话列表
-        if (typeof evt.title === "string" && evt.title) {
-          const session = sessions.value.find(
-            (s) => s.id === currentSessionId.value,
-          );
+        if (typeof evt.title === 'string' && evt.title) {
+          const session = sessions.value.find((s) => s.id === currentSessionId.value);
           if (session) session.title = evt.title;
           if (currentSession.value) currentSession.value.title = evt.title;
         }
         break;
       }
-      case "interrupt": {
+      case 'interrupt': {
         // 命中审批拦截, 暂停并弹出审批
         if (evt.approval) {
           // 把草稿答案写入 AI 消息(兜底: token 流可能未生效)
-          if (typeof evt.approval.draft === "string" && evt.approval.draft) {
+          if (typeof evt.approval.draft === 'string' && evt.approval.draft) {
             aiMessage.content = evt.approval.draft;
           }
           pendingApproval.value = {
             ...evt.approval,
-            session_id:
-              evt.approval.session_id || currentSessionId.value || undefined,
+            session_id: evt.approval.session_id || currentSessionId.value || undefined,
           };
         }
         break;
       }
-      case "error": {
-        aiMessage.content += `\n\n> ⚠️ ${evt.message || "未知错误"}`;
+      case 'error': {
+        aiMessage.content += `\n\n> ⚠️ ${evt.message || '未知错误'}`;
         break;
       }
       default:
@@ -290,27 +280,24 @@ export const useChatStore = defineStore("chat", () => {
    * approve: 后端发 done 事件(含草稿答案),写入 AI 消息
    * reject: 后端发 token 流 + done(第四节点重新生成),实时追加
    */
-  async function submitApproval(
-    approved: boolean,
-    reason?: string,
-  ): Promise<void> {
+  async function submitApproval(approved: boolean, reason?: string): Promise<void> {
     if (!currentSessionId.value) return;
 
     // 找到当前最后一条 AI 消息,审批结果写入它
-    const lastAi = [...messages.value].reverse().find((m) => m.role === "ai");
+    const lastAi = [...messages.value].reverse().find((m) => m.role === 'ai');
     if (!lastAi) return;
 
     // reject 时清空旧草稿,重新流式输出
     if (!approved) {
-      lastAi.content = "";
+      lastAi.content = '';
+      lastAi.nodeSteps = []; // 重生成时重置链路
     }
 
+    activeAiId.value = lastAi.id;
     streaming.value = true;
     try {
-      await approveSession(
-        currentSessionId.value,
-        { approved, reason },
-        (evt: ChatEvent) => handleEvent(evt, lastAi),
+      await approveSession(currentSessionId.value, { approved, reason }, (evt: ChatEvent) =>
+        handleEvent(evt, lastAi),
       );
     } catch (err) {
       lastAi.content += `\n\n> ⚠️ 审批请求失败: ${err instanceof Error ? err.message : String(err)}`;
@@ -328,7 +315,7 @@ export const useChatStore = defineStore("chat", () => {
     loadingSessions,
     loadingMessages,
     streaming,
-    nodeSteps,
+    activeAiId,
     pendingApproval,
     loadSessions,
     createSession,

@@ -8,35 +8,36 @@
 
 // ---------- 设计 token ----------
 :root {
-  // 色板
-  --ink: #17151b;                 // 页面底色(暖黑, 微紫调, 非深蓝)
-  --surface: #211d27;             // chrome: 侧栏/顶栏/输入
-  --surface-2: #2a2531;           // 悬停/浮起面
-  --surface-3: #332d3d;           // 输入框/更深浮起
-  --paper: #e9e3d3;               // AI 回答内容面(暖纸色)
-  --paper-ink: #2a2620;           // paper 上的正文色(墨)
-  --brass: #c29a3b;               // 唯一强调: 来源/置信章/激活态/发送
-  --brass-hover: #d4aa47;
-  --brass-soft: rgba(194, 154, 59, 0.16);
-  --ink-text: #d6d1c4;            // 暖白正文
-  --muted: #8f877a;               // 次级文字
-  --hairline: rgba(214, 209, 196, 0.1);  // 细分割线
+  // 色板: 企业化浅色(信任蓝强调)
+  --ink: #f5f7fa; // 页面底色(浅灰)
+  --surface: #ffffff; // chrome: 侧栏/顶栏/输入/卡片(白)
+  --surface-2: #eef2f7; // 悬停/浮起面
+  --surface-3: #f8fafc; // 输入框/更深浮起
+  --paper: #ffffff; // AI 回答内容面(白, 靠边框/阴影与页面区分)
+  --paper-ink: #1e293b; // paper 上的正文色
+  --brass: #2563eb; // 唯一强调: 来源/置信章/激活态/发送(信任蓝)
+  --brass-hover: #1d4ed8;
+  --brass-soft: rgba(37, 99, 235, 0.09);
+  --ink-text: #1e293b; // 主正文(石板深)
+  --muted: #64748b; // 次级文字(石板灰)
+  --hairline: #e2e8f0; // 细分割线(石板浅)
 
-  // 语义色(降饱和, 不与黄铜抢)
-  --danger: #c2665a;
-  --success: #6f9f6a;
-  --warning: #c7a24a;
+  // 语义色(降饱和, 不与蓝色抢)
+  --danger: #dc2626;
+  --success: #16a34a;
+  --warning: #d97706;
 
-  // 字体
-  --font-display: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'SimSun', serif;
+  // 字体(企业: 无衬线为主, 中文回退)
+  --font-display: 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-body: 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
 
-  // 圆角 / 阴影
+  // 圆角 / 阴影(浅色下阴影更轻)
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --shadow-elevated: 0 14px 44px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.06);
+  --shadow-elevated: 0 16px 40px rgba(15, 23, 42, 0.14);
 
   // ---- 旧 token 名向后兼容(避免组件遗漏引用导致样式失效) ----
   --bg-primary: var(--ink);
@@ -92,39 +93,49 @@ a {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(214, 209, 196, 0.14);
+  background: #cbd5e1;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(214, 209, 196, 0.26);
+  background: #94a3b8;
 }
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(214, 209, 196, 0.18) transparent;
+  scrollbar-color: #cbd5e1 transparent;
 }
 
 // ============================================================
 // Element Plus 暗色主题变量映射到本设计语言
 // ============================================================
-html.dark {
-  --el-color-primary: var(--brass);
-  --el-color-primary-light-3: var(--brass-hover);
-  --el-color-primary-dark-2: var(--brass);
-  --el-bg-color: var(--surface);
+:root {
+  // Element Plus 浅色主题映射(信任蓝主色, 石板中性灰)
+  --el-color-primary: #2563eb;
+  --el-color-primary-light-3: #3b82f6;
+  --el-color-primary-light-5: #60a5fa;
+  --el-color-primary-light-7: #93c5fd;
+  --el-color-primary-light-8: #bfdbfe;
+  --el-color-primary-light-9: #dbeafe;
+  --el-color-primary-dark-2: #1d4ed8;
+  --el-bg-color: #ffffff;
   --el-bg-color-page: var(--ink);
-  --el-bg-color-overlay: var(--surface-2);
-  --el-text-color-primary: var(--ink-text);
-  --el-text-color-regular: var(--ink-text);
-  --el-text-color-secondary: var(--muted);
-  --el-border-color: var(--hairline);
-  --el-border-color-light: var(--hairline);
-  --el-border-color-lighter: var(--hairline);
-  --el-fill-color: rgba(214, 209, 196, 0.05);
-  --el-fill-color-blank: var(--surface);
-  --el-fill-color-light: rgba(214, 209, 196, 0.08);
-  --el-fill-color-lighter: rgba(214, 209, 196, 0.05);
-  --el-mask-color: rgba(0, 0, 0, 0.6);
-  // 语义按钮色映射到降饱和色板(删除/通过/驳回等)
+  --el-bg-color-overlay: #ffffff;
+  --el-text-color-primary: #1e293b;
+  --el-text-color-regular: #334155;
+  --el-text-color-secondary: #64748b;
+  --el-text-color-placeholder: #94a3b8;
+  --el-text-color-disabled: #cbd5e1;
+  --el-border-color: #d0d7de;
+  --el-border-color-light: #e2e8f0;
+  --el-border-color-lighter: #eaeef3;
+  --el-border-color-extra-light: #f1f5f9;
+  --el-border-color-hover: #94a3b8;
+  --el-fill-color: #f1f5f9;
+  --el-fill-color-light: #f5f7fa;
+  --el-fill-color-lighter: #f8fafc;
+  --el-fill-color-blank: #ffffff;
+  --el-fill-color-dark: #e2e8f0;
+  --el-mask-color: rgba(15, 23, 42, 0.45);
+  // 语义按钮色映射(删除/通过/驳回等)
   --el-color-danger: var(--danger);
   --el-color-success: var(--success);
   --el-color-warning: var(--warning);

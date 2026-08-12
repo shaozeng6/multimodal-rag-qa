@@ -1,14 +1,14 @@
 """MySQL 异步连接模块,提供 SQLAlchemy 异步 engine / session 以及 Base。"""
 from typing import AsyncGenerator
 
+from loguru import logger
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 from sqlalchemy.orm import declarative_base
-from sqlalchemy import select, text
-from loguru import logger
 
 from core.config import settings
 
@@ -94,6 +94,61 @@ async def _ensure_knowledge_columns(conn) -> None:
         "ADD COLUMN milvus_ids JSON NULL "
         "COMMENT 'Milvus t_doc 主键列表, 按文档精确删除用' AFTER image_count",
     )
+    await _ensure_column(
+        conn, "knowledge_documents", "char_count",
+        "ALTER TABLE knowledge_documents "
+        "ADD COLUMN char_count INT DEFAULT 0 "
+        "COMMENT '文本类 chunk 字符数合计(含图片/表格描述)' AFTER image_count",
+    )
+    await _ensure_column(
+        conn, "knowledge_documents", "file_size",
+        "ALTER TABLE knowledge_documents "
+        "ADD COLUMN file_size BIGINT DEFAULT 0 "
+        "COMMENT '源文件字节数' AFTER char_count",
+    )
+
+
+async def _ensure_ingest_columns(conn) -> None:
+    """补齐 ingest_jobs 随版本新增的列(schema_v3 进度可视化)。"""
+    await _ensure_column(
+        conn, "ingest_jobs", "progress",
+        "ALTER TABLE ingest_jobs "
+        "ADD COLUMN progress INT DEFAULT 0 COMMENT '0~100 进度百分比' AFTER error",
+    )
+    await _ensure_column(
+        conn, "ingest_jobs", "stage_detail",
+        "ALTER TABLE ingest_jobs "
+        "ADD COLUMN stage_detail VARCHAR(255) DEFAULT '' "
+        "COMMENT '阶段明细(如 向量化 45/120)' AFTER progress",
+    )
+    await _ensure_column(
+        conn, "ingest_jobs", "run_mode",
+        "ALTER TABLE ingest_jobs "
+        "ADD COLUMN run_mode VARCHAR(10) DEFAULT 'auto' "
+        "COMMENT '运行模式: auto 自动全流程 / manual 手动分步' AFTER stage_detail",
+    )
+    await _ensure_column(
+        conn, "ingest_jobs", "phase",
+        "ALTER TABLE ingest_jobs "
+        "ADD COLUMN phase VARCHAR(10) DEFAULT 'parse' "
+        "COMMENT '阶段: parse 解析(OCR/分片) / index 索引(描述/向量化/入库)' AFTER run_mode",
+    )
+
+
+async def _ensure_ingest_status_enum(conn) -> None:
+    """ingest_jobs.status Enum 追加 cancelled(MySQL 无 ADD ENUM VALUE, 需整列 MODIFY)。"""
+    result = await conn.execute(text(
+        "SELECT COLUMN_TYPE FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ingest_jobs' AND COLUMN_NAME = 'status'"
+    ))
+    row = result.first()
+    if row and "cancelled" in (row[0] or ""):
+        return
+    await conn.execute(text(
+        "ALTER TABLE ingest_jobs MODIFY COLUMN status "
+        "ENUM('pending','running','success','error','cancelled') NOT NULL DEFAULT 'pending'"
+    ))
+    logger.info("迁移: ingest_jobs.status 已追加 cancelled 枚举值")
 
 
 async def init_db() -> None:
@@ -102,17 +157,25 @@ async def init_db() -> None:
     初始账号: username=admin, password=admin123
     """
     # 延迟导入,避免循环依赖; 全部模型都需在此注册, create_all 才会建表
-    from models.user import User  # noqa: WPS433
-    from models.session import Session, Message  # noqa: WPS433,F401
-    from models.message_extra import MessageImage, MessageTrace  # noqa: WPS433,F401
-    from models.ingestion import IngestJob, KnowledgeDocument  # noqa: WPS433,F401
     from core.security import pwd_context  # noqa: WPS433
+    from models.config import SysConfig  # noqa: WPS433,F401
+    from models.ingestion import IngestJob, KnowledgeDocument  # noqa: WPS433,F401
+    from models.message_extra import MessageImage, MessageTrace  # noqa: WPS433,F401
+    from models.session import Message, Session  # noqa: WPS433,F401
+    from models.user import User  # noqa: WPS433
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         logger.info("数据库表已创建(若不存在)")
         await _ensure_trace_columns(conn)
         await _ensure_knowledge_columns(conn)
+        await _ensure_ingest_columns(conn)
+        await _ensure_ingest_status_enum(conn)
+
+    # 配置中心: sys_config 表空则写默认值种子, 并载入内存缓存(懒加载兜底, 幂等)
+    from services import config_service  # noqa: WPS433
+    config_service.load()
+    logger.info("配置中心初始化完成")
 
     # 插入初始 admin 账号
     async with async_session_maker() as session:

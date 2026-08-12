@@ -18,19 +18,19 @@
 - nodes_shared:   图片进模型共享辅助与常量(generator/evaluate 共用)
 - milvus_writer:  记忆 Milvus 异步写入器
 """
-from graph.nodes_input import (
-    process_input,
-    image_analysis_node,
-    query_rewriter_node,
-)
+from graph.milvus_writer import OptimizedMilvusAsyncWriter, get_milvus_writer
+from graph.nodes_evaluate import evaluate_answer
 from graph.nodes_generate import (
     generator_node,
     human_approval,
     regenerate_node,
 )
-from graph.nodes_evaluate import evaluate_answer
+from graph.nodes_input import (
+    image_analysis_node,
+    process_input,
+    query_rewriter_node,
+)
 from graph.nodes_persist import persist_context_node
-from graph.milvus_writer import OptimizedMilvusAsyncWriter, get_milvus_writer
 from graph.retrieval import unified_retrieve
 
 # 检索节点即统一检索函数(确定性节点, 非工具调用)

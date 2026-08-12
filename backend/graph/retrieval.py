@@ -18,20 +18,45 @@ from loguru import logger
 from pymilvus import AnnSearchRequest, WeightedRanker
 
 from graph.llm_init import (
+    CONTEXT_COLLECTION_NAME,
     call_dashscope_once,
     embedding,
-    milvus_client,
     m_re,
-    CONTEXT_COLLECTION_NAME,
+    milvus_client,
 )
+from services.config_service import get_float, get_int
 
-# ========= 配置常量(集中管理) =========
+# ========= 配置常量(集中管理; 运行时由 sys_config 覆盖, 常量仅作默认值兜底) =========
 TEXT_TOPK = 6        # 文本路候选数
 IMAGE_TOPK = 4       # 图片路候选数
 MEMORY_TOPK = 3      # 记忆路候选数
 CONTEXT_TOPK = 8     # 融合后进入生成器的上下文条数
 RRF_K = 60           # RRF 平滑常数
 MEMORY_WEIGHT = 0.8  # 记忆路 RRF 权重(低于知识库路)
+
+
+def _text_topk() -> int:
+    return get_int("retrieval.text_topk", TEXT_TOPK)
+
+
+def _image_topk() -> int:
+    return get_int("retrieval.image_topk", IMAGE_TOPK)
+
+
+def _memory_topk() -> int:
+    return get_int("retrieval.memory_topk", MEMORY_TOPK)
+
+
+def _context_topk() -> int:
+    return get_int("retrieval.context_topk", CONTEXT_TOPK)
+
+
+def _rrf_k() -> int:
+    return get_int("retrieval.rrf_k", RRF_K)
+
+
+def _memory_weight() -> float:
+    return get_float("retrieval.memory_weight", MEMORY_WEIGHT)
 
 # ========= 阻塞调用包装 =========
 
@@ -237,13 +262,19 @@ async def _search_channels(query: str, text_emb, image_emb):
       否则新会话第一问永远回忆不到以前答过的内容。
       命中统一为 _memo_to_doc 结构并降权 MEMORY_WEIGHT。
     """
+    # 候选数与记忆权重运行时读取(配置中心 hot 生效)
+    text_topk = _text_topk()
+    image_topk = _image_topk()
+    memory_topk = _memory_topk()
+    memory_weight = _memory_weight()
+
     tasks = []
     if text_emb and query:
-        tasks.append(("text", _search_doc_text(text_emb, query, TEXT_TOPK)))
+        tasks.append(("text", _search_doc_text(text_emb, query, text_topk)))
     if image_emb:
-        tasks.append(("image", _search_doc_image(image_emb, IMAGE_TOPK)))
+        tasks.append(("image", _search_doc_image(image_emb, image_topk)))
     if query:
-        tasks.append(("memory", _search_context(query, MEMORY_TOPK)))
+        tasks.append(("memory", _search_context(query, memory_topk)))
     if not tasks:
         return [], []
 
@@ -255,7 +286,7 @@ async def _search_channels(query: str, text_emb, image_emb):
             continue
         if name == "memory":
             channels.append([_memo_to_doc(h) for h in _dedupe(res)])
-            weights.append(MEMORY_WEIGHT)
+            weights.append(memory_weight)
         else:
             channels.append(_dedupe(res))
             weights.append(1.0)
@@ -296,9 +327,9 @@ async def unified_retrieve(state) -> dict:
     # 2. 三路并行检索 + 去重(单路失败降级为空)
     channels, weights = await _search_channels(plan["query"], text_emb, image_emb)
 
-    # 3. RRF 名次融合(相对名次, 跨通道量纲不可比) + topK
-    fused = _rrf_fuse(channels, weights=weights) if channels else []
-    fused = fused[:CONTEXT_TOPK]
+    # 3. RRF 名次融合(相对名次, 跨通道量纲不可比) + topK(运行时读取)
+    fused = _rrf_fuse(channels, k=_rrf_k(), weights=weights) if channels else []
+    fused = fused[:_context_topk()]
 
     # 4. 拆成上下文列表与图片路径列表
     docs, images = _build_context(fused)

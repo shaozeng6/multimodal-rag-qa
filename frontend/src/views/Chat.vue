@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { onMounted, ref, watch, nextTick } from "vue";
-import { useRouter, useRoute } from "vue-router";
-import { ElMessageBox, ElMessage } from "element-plus";
-import { SwitchButton, DocumentCopy } from "@element-plus/icons-vue";
-import { useChatStore } from "@/stores/chat";
-import { useAuthStore } from "@/stores/auth";
-import SessionList from "@/components/SessionList.vue";
-import ChatInput from "@/components/ChatInput.vue";
-import MessageBubble from "@/components/MessageBubble.vue";
-import ApprovalDialog from "@/components/ApprovalDialog.vue";
+import { onMounted, ref, computed, watch, nextTick } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
+import { ElMessageBox, ElMessage } from 'element-plus';
+import { SwitchButton, DocumentCopy, Setting } from '@element-plus/icons-vue';
+import { useChatStore } from '@/stores/chat';
+import { useAuthStore } from '@/stores/auth';
+import SessionList from '@/components/SessionList.vue';
+import ChatInput from '@/components/ChatInput.vue';
+import MessageBubble from '@/components/MessageBubble.vue';
+import ApprovalDialog from '@/components/ApprovalDialog.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -21,7 +21,14 @@ const approvalVisible = ref(false);
 const sidebarOpen = ref(false);
 
 // 当前会话标题
-const currentTitle = ref("多模态 RAG 知识库问答");
+const currentTitle = ref('多模态 RAG 知识库问答');
+
+/** 当前 AI 消息的执行链路: 流式期间实时累计, 回答完成后仍保留展示 */
+const activeAiSteps = computed(() => {
+  if (!chatStore.activeAiId) return [];
+  const msg = chatStore.messages.find((m) => m.id === chatStore.activeAiId);
+  return msg?.nodeSteps || [];
+});
 
 /** 滚动到消息底部 */
 function scrollToBottom(): void {
@@ -35,7 +42,7 @@ function scrollToBottom(): void {
 async function handleNewSession(): Promise<void> {
   await chatStore.createSession();
   router.push({
-    path: "/chat",
+    path: '/chat',
     query: { sessionId: chatStore.currentSessionId || undefined },
   });
 }
@@ -43,14 +50,14 @@ async function handleNewSession(): Promise<void> {
 /** 选中会话(由 SessionList 触发) */
 function handleSelectSession(id: string): void {
   sidebarOpen.value = false; // 移动端选中后收起抽屉
-  router.push({ path: "/chat", query: { sessionId: id } });
+  router.push({ path: '/chat', query: { sessionId: id } });
 }
 
 /** 删除会话: 错误处理 + 路由更新 + 无会话时自动新建 */
 async function handleDeleteSession(id: string): Promise<void> {
   // 流式输出中禁止删除当前会话
   if (chatStore.streaming && id === chatStore.currentSessionId) {
-    ElMessage.warning("正在回复中, 请等待回复结束后再删除当前会话");
+    ElMessage.warning('正在回复中, 请等待回复结束后再删除当前会话');
     return;
   }
   try {
@@ -58,22 +65,20 @@ async function handleDeleteSession(id: string): Promise<void> {
     if (chatStore.currentSessionId) {
       // 已自动选中剩余会话, 同步路由
       router.replace({
-        path: "/chat",
+        path: '/chat',
         query: { sessionId: chatStore.currentSessionId },
       });
     } else {
       // 无剩余会话, 自动新建一个
       await chatStore.createSession();
       router.replace({
-        path: "/chat",
+        path: '/chat',
         query: { sessionId: chatStore.currentSessionId || undefined },
       });
     }
-    ElMessage.success("会话已删除");
+    ElMessage.success('会话已删除');
   } catch (err) {
-    ElMessage.error(
-      `删除失败: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    ElMessage.error(`删除失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -84,11 +89,11 @@ async function handleSend(text: string, image: string | null): Promise<void> {
     try {
       await chatStore.createSession();
       router.replace({
-        path: "/chat",
+        path: '/chat',
         query: { sessionId: chatStore.currentSessionId || undefined },
       });
     } catch {
-      ElMessage.error("创建会话失败, 请稍后重试");
+      ElMessage.error('创建会话失败, 请稍后重试');
       return;
     }
   }
@@ -99,16 +104,16 @@ async function handleSend(text: string, image: string | null): Promise<void> {
 /** 登出 */
 async function handleLogout(): Promise<void> {
   try {
-    await ElMessageBox.confirm("确定要退出登录吗?", "提示", {
-      confirmButtonText: "退出",
-      cancelButtonText: "取消",
-      type: "warning",
-      confirmButtonType: "danger",
-      customClass: "confirm-box",
+    await ElMessageBox.confirm('确定要退出登录吗?', '提示', {
+      confirmButtonText: '退出',
+      cancelButtonText: '取消',
+      type: 'warning',
+      confirmButtonType: 'danger',
+      customClass: 'confirm-box',
       center: true,
     });
     auth.logout();
-    router.push("/login");
+    router.push('/login');
   } catch {
     // 用户取消
   }
@@ -116,7 +121,36 @@ async function handleLogout(): Promise<void> {
 
 /** 跳转知识库管理 */
 function goKnowledge(): void {
-  router.push("/knowledge");
+  console.log('[nav] goKnowledge → /knowledge', { isAdmin: auth.isAdmin, user: auth.user });
+  router
+    .push('/knowledge')
+    .then(() => {
+      console.log('[nav] goKnowledge 已跳转, URL =', window.location.pathname);
+    })
+    .catch((err) => {
+      console.error('[nav] goKnowledge 跳转失败', err);
+      ElMessage.error(`跳转失败: ${err instanceof Error ? err.message : String(err)}`);
+    });
+}
+
+/** 跳转知识库管理页的系统设置 Tab(同一管理页内切换, 无需来回跳页) */
+function goSettings(): void {
+  console.log('[nav] goSettings → /knowledge?tab=settings', {
+    isAdmin: auth.isAdmin,
+    user: auth.user,
+  });
+  router
+    .push({ path: '/knowledge', query: { tab: 'settings' } })
+    .then(() => {
+      console.log(
+        '[nav] goSettings 已跳转, URL =',
+        window.location.pathname + window.location.search,
+      );
+    })
+    .catch((err) => {
+      console.error('[nav] goSettings 跳转失败', err);
+      ElMessage.error(`跳转失败: ${err instanceof Error ? err.message : String(err)}`);
+    });
 }
 
 // 监听审批拦截: 命中时弹出审批弹窗
@@ -135,7 +169,7 @@ watch(
 
 // 监听流式输出时内容增长, 持续滚动
 watch(
-  () => chatStore.messages.map((m) => m.content).join(""),
+  () => chatStore.messages.map((m) => m.content).join(''),
   () => scrollToBottom(),
 );
 
@@ -143,7 +177,7 @@ watch(
 watch(
   () => route.query.sessionId,
   async (id) => {
-    if (typeof id === "string" && id && id !== chatStore.currentSessionId) {
+    if (typeof id === 'string' && id && id !== chatStore.currentSessionId) {
       // 仅当会话存在于本地列表时才切换, 避免对已删除会话发请求导致 404
       const exists = chatStore.sessions.some((s) => s.id === id);
       if (exists) {
@@ -165,7 +199,7 @@ onMounted(async () => {
     // 无会话时自动创建一个默认会话
     await chatStore.createSession();
     router.push({
-      path: "/chat",
+      path: '/chat',
       query: { sessionId: chatStore.currentSessionId || undefined },
     });
   }
@@ -186,9 +220,7 @@ onMounted(async () => {
           <span class="brand-name">RAG 知识工作台</span>
         </div>
         <el-divider direction="vertical" />
-        <span class="session-title">{{
-          chatStore.currentSession?.title || currentTitle
-        }}</span>
+        <span class="session-title">{{ chatStore.currentSession?.title || currentTitle }}</span>
       </div>
 
       <div class="header-right">
@@ -201,12 +233,16 @@ onMounted(async () => {
         >
           知识库管理
         </el-button>
+        <el-button v-if="auth.isAdmin" text :icon="Setting" class="header-btn" @click="goSettings">
+          系统设置
+        </el-button>
+        <el-divider v-if="auth.isAdmin" direction="vertical" class="header-divider" />
         <el-dropdown trigger="click">
           <div class="user-info">
             <el-avatar :size="32" class="user-avatar">
-              {{ auth.user?.username?.charAt(0).toUpperCase() || "U" }}
+              {{ auth.user?.username?.charAt(0).toUpperCase() || 'U' }}
             </el-avatar>
-            <span class="username">{{ auth.user?.username || "用户" }}</span>
+            <span class="username">{{ auth.user?.username || '用户' }}</span>
           </div>
           <template #dropdown>
             <el-dropdown-menu>
@@ -243,9 +279,7 @@ onMounted(async () => {
           <div v-if="chatStore.messages.length === 0" class="empty-state">
             <div class="empty-icon">❝</div>
             <p>向企业知识库提问</p>
-            <p class="empty-sub">
-              支持文本与图片；回答会标注来源与置信度，低可信将进入人工审批
-            </p>
+            <p class="empty-sub">支持文本与图片；回答会标注来源与置信度，低可信将进入人工审批</p>
           </div>
 
           <MessageBubble
@@ -263,9 +297,9 @@ onMounted(async () => {
             "
           />
 
-          <!-- 执行链路: 流式输出中展示当前经过的节点(单色仪器条) -->
-          <div v-if="chatStore.streaming && chatStore.nodeSteps.length" class="node-steps">
-            <template v-for="(step, idx) in chatStore.nodeSteps" :key="idx">
+          <!-- 执行链路: 当前 AI 消息经过的节点(回答完成后仍显示, 直到下一条消息) -->
+          <div v-if="activeAiSteps.length" class="node-steps">
+            <template v-for="(step, idx) in activeAiSteps" :key="idx">
               <span v-if="idx > 0" class="step-arrow">→</span>
               <span class="step-item">
                 <span class="step-dot"></span>
@@ -332,7 +366,7 @@ onMounted(async () => {
   height: 26px;
   border-radius: 7px;
   background: var(--brass);
-  color: #1b1814;
+  color: #ffffff;
   font-family: var(--font-display);
   font-size: 15px;
   font-weight: 700;
@@ -388,7 +422,24 @@ onMounted(async () => {
 }
 
 .header-btn {
-  color: var(--text-secondary);
+  color: var(--muted);
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  transition:
+    background 0.15s,
+    color 0.15s;
+
+  &:hover {
+    background: var(--surface-2);
+    color: var(--ink-text);
+  }
+}
+
+.header-divider {
+  height: 20px;
+  margin: 0 4px;
+  border-color: var(--hairline);
 }
 
 .user-info {
@@ -511,7 +562,7 @@ onMounted(async () => {
     padding: 2px 8px;
     border-radius: 3px;
     background: var(--brass-soft);
-    border: 1px solid rgba(194, 154, 59, 0.28);
+    border: 1px solid rgba(37, 99, 235, 0.28);
     color: var(--brass);
     animation: step-fade-in 0.3s ease;
 

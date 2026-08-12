@@ -2,13 +2,13 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     Column,
+    DateTime,
+    Enum,
+    ForeignKey,
     Integer,
     String,
-    BigInteger,
-    Enum,
-    DateTime,
-    ForeignKey,
     Text,
 )
 

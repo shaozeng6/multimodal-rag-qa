@@ -5,15 +5,14 @@
 历史图随 messages 直传。评审节点需与生成器看到的口径一致, 故图集与证据逻辑
 抽到本模块供 generator/evaluate/regenerate 复用。
 """
-import os
 import re
 from typing import Optional
 
-from graph.context import get_working_window, _message_image_url
+from graph.context import _message_image_url, get_working_window
 from graph.llm_init import image_to_base64
+from services.config_service import get_int
 
-
-# ========= 图片进模型: 上限控制, 控 token =========
+# ========= 图片进模型: 上限控制, 控 token(运行时由 sys_config 覆盖, 常量作默认值兜底) =========
 RETRIEVED_IMAGES_TO_MODEL = 2  # 检索命中的图, 评审最多参考几张(仅 evaluate 核实用)
 HISTORY_IMAGES_TO_MODEL = 1    # 历史对话里的图, 最多还原几张(judge 用)
 MAX_IMAGES_TO_MODEL = 4        # 当前输入图 + 历史图 总上限
@@ -80,18 +79,22 @@ def _extract_evidence(answer: str, kb_context: list) -> list:
     return list(by_key.values())
 
 
-def _retrieved_images_for_model(kb_images: list, limit: int = RETRIEVED_IMAGES_TO_MODEL) -> list:
+def _retrieved_images_for_model(kb_images: list, limit: Optional[int] = None) -> list:
     """取检索命中的前 limit 张图(按 RRF 名次), 仅供 evaluate 核实时参考。
 
     生成器方案B 不把检索图进模型(以 [图片] 标签 doc 文本作答); 但回答会引用
     知识库图片, judge 若看不到就无法核实引用, 会把忠实描述误判为幻觉
     (faithfulness=2.0 案例), 故评审单独参考检索图。
     """
+    if limit is None:
+        limit = get_int("rag.retrieved_images_to_model", RETRIEVED_IMAGES_TO_MODEL)
     return [img for img in (kb_images or []) if img][:limit]
 
 
-def _history_images_from_messages(messages: list, limit: int = HISTORY_IMAGES_TO_MODEL) -> list:
+def _history_images_from_messages(messages: list, limit: Optional[int] = None) -> list:
     """取窗口内 HumanMessage 携带的图(最近优先), 供 judge 还原生成器看到的历史图。"""
+    if limit is None:
+        limit = get_int("rag.history_images_to_model", HISTORY_IMAGES_TO_MODEL)
     working = get_working_window(messages)
     images = []
     for msg in reversed(working):

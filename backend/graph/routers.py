@@ -7,6 +7,7 @@ from loguru import logger
 
 from core.config import settings
 from graph.state import MultiModalRAGState
+from services.config_service import get_float
 
 
 def route_image_analysis(state: MultiModalRAGState):
@@ -31,7 +32,8 @@ def route_human_node(state: MultiModalRAGState):
         logger.warning("[路由] 评估失败或未评分, 静默放行 → persist_context")
         return "persist_context"
 
-    threshold = settings.EVALUATE_THRESHOLD
+    # 阈值从 sys_config 读(hot 生效), settings.EVALUATE_THRESHOLD 作兜底
+    threshold = get_float("evaluate.threshold", settings.EVALUATE_THRESHOLD)
     if score >= threshold:
         logger.info("[路由] evaluate_node → persist_context (score={:.3f} >= {:.2f})", score, threshold)
         return "persist_context"

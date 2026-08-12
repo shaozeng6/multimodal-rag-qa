@@ -10,10 +10,10 @@ from langchain_core.runnables import RunnableConfig
 from loguru import logger
 
 from graph.context import input_modality
-from graph.state import MultiModalRAGState
-from graph.rewrite import normalize_terms, rewrite_and_split
 from graph.image_analysis import analyze_image
 from graph.llm_init import multiModal_llm, rewriter_llm
+from graph.rewrite import normalize_terms, rewrite_and_split
+from graph.state import MultiModalRAGState
 
 
 def process_input(state: MultiModalRAGState, config: RunnableConfig):

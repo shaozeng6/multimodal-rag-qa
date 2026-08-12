@@ -1,21 +1,21 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import { User, Lock } from '@element-plus/icons-vue'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { useAuthStore } from '@/stores/auth'
+import { reactive, ref } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
+import { User, Lock } from '@element-plus/icons-vue';
+import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
+import { useAuthStore } from '@/stores/auth';
 
-const router = useRouter()
-const route = useRoute()
-const auth = useAuthStore()
+const router = useRouter();
+const route = useRoute();
+const auth = useAuthStore();
 
-const formRef = ref<FormInstance>()
-const loading = ref(false)
+const formRef = ref<FormInstance>();
+const loading = ref(false);
 
 const form = reactive({
   username: '',
   password: '',
-})
+});
 
 // 表单校验规则
 const rules: FormRules = {
@@ -24,27 +24,27 @@ const rules: FormRules = {
     { required: true, message: '请输入密码', trigger: 'blur' },
     { min: 4, message: '密码长度不少于 4 位', trigger: 'blur' },
   ],
-}
+};
 
 /** 登录提交 */
 async function handleLogin(): Promise<void> {
-  if (!formRef.value) return
+  if (!formRef.value) return;
   await formRef.value.validate(async (valid) => {
-    if (!valid) return
-    loading.value = true
+    if (!valid) return;
+    loading.value = true;
     try {
-      await auth.login({ username: form.username, password: form.password })
-      ElMessage.success('登录成功')
+      await auth.login({ username: form.username, password: form.password });
+      ElMessage.success('登录成功');
       // 优先跳转到 redirect 参数指向的页面
-      const redirect = (route.query.redirect as string) || '/chat'
-      router.push(redirect)
+      const redirect = (route.query.redirect as string) || '/chat';
+      router.push(redirect);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '登录失败, 请检查账号密码'
-      ElMessage.error(msg)
+      const msg = err instanceof Error ? err.message : '登录失败, 请检查账号密码';
+      ElMessage.error(msg);
     } finally {
-      loading.value = false
+      loading.value = false;
     }
-  })
+  });
 }
 </script>
 
@@ -84,12 +84,7 @@ async function handleLogin(): Promise<void> {
           />
         </el-form-item>
 
-        <el-button
-          type="primary"
-          class="login-btn"
-          :loading="loading"
-          @click="handleLogin"
-        >
+        <el-button type="primary" class="login-btn" :loading="loading" @click="handleLogin">
           登 录
         </el-button>
       </el-form>
@@ -137,7 +132,7 @@ async function handleLogin(): Promise<void> {
   font-size: 28px;
   font-weight: 700;
   font-family: var(--font-display);
-  color: #1b1814;
+  color: #ffffff;
   background: var(--brass);
 }
 
@@ -168,11 +163,11 @@ async function handleLogin(): Promise<void> {
   letter-spacing: 4px;
   border: none;
   background: var(--brass);
-  color: #1b1814;
+  color: #ffffff;
 
   &:hover {
     background: var(--brass-hover);
-    color: #1b1814;
+    color: #ffffff;
   }
 }
 

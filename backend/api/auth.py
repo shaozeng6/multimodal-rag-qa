@@ -3,9 +3,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.deps import get_current_user
 from db.mysql import get_db
 from models.user import User
-from core.deps import get_current_user
 from services.auth_service import authenticate_user, create_token_for_user
 
 router = APIRouter(prefix="/auth", tags=["认证"])

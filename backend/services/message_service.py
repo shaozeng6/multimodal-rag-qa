@@ -10,12 +10,12 @@ schema_v2 规范化: 一条消息落三张表。
 """
 from typing import Dict, List, Optional
 
-from sqlalchemy import select
 from loguru import logger
+from sqlalchemy import select
 
-from models.session import Message
-from models.message_extra import MessageImage, MessageTrace
 from db.mysql import async_session_maker
+from models.message_extra import MessageImage, MessageTrace
+from models.session import Message
 from services.image_store import resolve_image_url
 
 # trace dict(_build_trace 返回)与 MessageTrace 列的映射(排除 message_id 等由函数注入的键)
@@ -94,6 +94,25 @@ async def list_message_images(session_id: str) -> Dict[int, List[str]]:
             if url:
                 grouped.setdefault(message_id, []).append(url)
         return grouped
+
+
+async def list_message_scores(session_id: str) -> Dict[int, float]:
+    """按消息分组返回评估分(message_id -> 0-100 显示分)。
+
+    历史消息的置信章数据来自 message_traces.evaluate_score(0~1), 前端以 0-100 展示,
+    这里统一换算。无评分的消息(如审批通过前)不返回。
+    """
+    async with async_session_maker() as db:
+        result = await db.execute(
+            select(MessageTrace.evaluate_score, Message.id)
+            .join(Message, Message.id == MessageTrace.message_id)
+            .where(Message.session_id == session_id)
+        )
+        scores: Dict[int, float] = {}
+        for evaluate_score, message_id in result.all():
+            if evaluate_score is not None:
+                scores[message_id] = round(float(evaluate_score) * 100, 1)
+        return scores
 
 
 async def list_message_evidence(session_id: str) -> Dict[int, list]:

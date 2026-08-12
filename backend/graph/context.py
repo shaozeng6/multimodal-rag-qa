@@ -6,32 +6,38 @@
 - summary_anchor 水位线防止同一段内容被重复压缩
 - 摘要合并用"旧摘要当 assistant 消息 + 冲突以本轮为准"避免越摘要越失真
 """
-import os
 from typing import Optional, Tuple
 
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
 
+from services.config_service import get_int
 
-def _env_int(name: str, default: int) -> int:
-    """从环境变量读取整数, 非法值回退默认。"""
-    try:
-        return int(os.getenv(name, default))
-    except (TypeError, ValueError):
-        return default
-
-
-# ========= 配置常量(集中管理) =========
-WINDOW_TURNS = _env_int("RAG_WINDOW_TURNS", 8)  # 保留最近几轮原文
-SUMMARY_TRIGGER_TURNS = _env_int("RAG_SUMMARY_TRIGGER_TURNS", 9)  # 超过该轮数触发压缩
-SUMMARY_MAX_CHARS = _env_int("RAG_SUMMARY_MAX_CHARS", 400)  # 摘要最大字符数
+# ========= 配置常量(集中管理; 运行时由 sys_config 覆盖, 常量仅作默认值兜底) =========
+WINDOW_TURNS = 8  # 保留最近几轮原文
+SUMMARY_TRIGGER_TURNS = 9  # 超过该轮数触发压缩
+SUMMARY_MAX_CHARS = 400  # 摘要最大字符数
 SUMMARY_MODEL_TEMPERATURE = 0.3
+
+
+def _window_turns() -> int:
+    return get_int("context.window_turns", WINDOW_TURNS)
+
+
+def _trigger_turns() -> int:
+    return get_int("context.summary_trigger_turns", SUMMARY_TRIGGER_TURNS)
+
+
+def _max_chars() -> int:
+    return get_int("context.summary_max_chars", SUMMARY_MAX_CHARS)
 
 
 # ========= 基础操作 =========
 
-def get_working_window(messages: list, window_turns: int = WINDOW_TURNS) -> list:
+def get_working_window(messages: list, window_turns: Optional[int] = None) -> list:
     """取最近 window_turns 对消息原文(滑动窗口, messages 为扁平 human/ai 交替)。"""
+    if window_turns is None:
+        window_turns = _window_turns()
     if not messages:
         return []
     pairs = list(zip(messages[0::2], messages[1::2]))
@@ -140,7 +146,7 @@ def build_human_text(input_text: Optional[str], input_image: Optional[str]) -> T
 # ========= 摘要压缩(ragent 算法) =========
 
 def _next_compress_range(messages: list, anchor: int,
-                         window_turns: int = WINDOW_TURNS) -> Optional[Tuple[int, int]]:
+                         window_turns: Optional[int] = None) -> Optional[Tuple[int, int]]:
     """计算本次要压缩的 [start, cutoff) 区间; 无需压缩返回 None。
 
     采用 ragent 的半重叠策略:
@@ -148,6 +154,8 @@ def _next_compress_range(messages: list, anchor: int,
     - cutoff 取"保留窗口的中点", 使摘要与窗口部分重叠, 保证叙事连续性
     - anchor(水位线) 保证同一段内容只被压缩一次
     """
+    if window_turns is None:
+        window_turns = _window_turns()
     length = len(messages)
     compress_until = length - window_turns  # 保留窗口的起点
     if compress_until <= 0:
@@ -206,9 +214,9 @@ async def compress_summary(
     summary: str,
     anchor: int,
     llm,
-    window_turns: int = WINDOW_TURNS,
-    max_chars: int = SUMMARY_MAX_CHARS,
-    trigger_turns: int = SUMMARY_TRIGGER_TURNS,
+    window_turns: Optional[int] = None,
+    max_chars: Optional[int] = None,
+    trigger_turns: Optional[int] = None,
 ) -> Tuple[str, int, bool]:
     """触发式滚动摘要压缩。
 
@@ -221,6 +229,12 @@ async def compress_summary(
     Returns:
         (新摘要, 新水位线, 是否发生了压缩)
     """
+    if window_turns is None:
+        window_turns = _window_turns()
+    if max_chars is None:
+        max_chars = _max_chars()
+    if trigger_turns is None:
+        trigger_turns = _trigger_turns()
     turns = len(messages) // 2
     if turns < trigger_turns:
         return summary, anchor, False

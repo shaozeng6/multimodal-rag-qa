@@ -13,5 +13,6 @@ sync_engine = create_engine(
     settings.MYSQL_URL.replace("+aiomysql", "+pymysql"),
     pool_pre_ping=True,
     pool_recycle=3600,
+    connect_args={"connect_timeout": 3},  # DB 不可达时快速失败, 避免 daemon 线程/启动导入长时间阻塞
 )
 SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)

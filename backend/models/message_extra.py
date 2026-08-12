@@ -7,16 +7,16 @@ schema_v2 规范化: 原 messages.metadata(JSON 垃圾桶)拆为两张独立表�
 from datetime import datetime
 
 from sqlalchemy import (
-    Column,
-    Integer,
+    JSON,
     BigInteger,
-    Enum,
-    String,
     Boolean,
+    Column,
+    DateTime,
+    Enum,
     Float,
     ForeignKey,
-    DateTime,
-    JSON,
+    Integer,
+    String,
 )
 
 from db.mysql import Base

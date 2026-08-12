@@ -11,17 +11,17 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
+from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from loguru import logger
 
-from db.mysql import get_db
-from models.user import User
 from core.deps import get_current_user
-from services.session_service import verify_session_owner, auto_title_session
-from services.message_service import save_message
-from services.image_store import save_image_from_data_uri, resolve_image_url
+from db.mysql import get_db
 from graph.workflow_service import graph
+from models.user import User
+from services.image_store import resolve_image_url, save_image_from_data_uri
+from services.message_service import save_message
+from services.session_service import auto_title_session, verify_session_owner
 
 router = APIRouter(prefix="/sessions", tags=["对话"])
 

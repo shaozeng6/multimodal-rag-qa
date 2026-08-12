@@ -12,14 +12,16 @@ import os
 import re
 from typing import List
 
-from PIL import Image
 from langchain_core.documents import Document
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from loguru import logger
+from PIL import Image
+
+from services.config_service import get_int
 
 
 def get_sorted_md_files(input_dir: str) -> List[str]:
-    """列出目录下所有 .md, 按文件名中 _page_(\d+) 数字排序, 无数字的排最后。"""
+    r"""列出目录下所有 .md, 按文件名中 _page_(\d+) 数字排序, 无数字的排最后。"""
     if not os.path.isdir(input_dir):
         return []
     md_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith(".md")]
@@ -34,9 +36,16 @@ def get_sorted_md_files(input_dir: str) -> List[str]:
 class MarkdownDirSplitter:
     """把 OCR 生成的 md 目录切成 text/image 两类 Documents。"""
 
-    def __init__(self, embedding, images_output_dir: str, text_chunk_size: int = 1000):
+    def __init__(self, embedding, images_output_dir: str, text_chunk_size: int = None):
+        """分片: 阈值 text_chunk_size 从 sys_config 读(hot, 对下一个入库任务生效)。
+
+        chunk_size 是「按标题切分后, 超过该字符数再按语义切分」的阈值;
+        语义切分下无重叠概念(chunk_overlap 已撤), 回退字符切分固定重叠 50。
+        """
         self.images_output_dir = images_output_dir
-        self.text_chunk_size = text_chunk_size
+        self.text_chunk_size = (
+            text_chunk_size if text_chunk_size is not None else get_int("ingestion.chunk_size", 1000)
+        )
         os.makedirs(self.images_output_dir, exist_ok=True)
 
         # 标题层级配置

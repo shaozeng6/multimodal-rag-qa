@@ -10,17 +10,18 @@ from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
 
-from graph.state import MultiModalRAGState
-from graph.context import get_working_window, format_history
+from graph.context import format_history, get_working_window
 from graph.llm_init import judge_llm, multiModal_llm
 from graph.nodes_shared import (
+    _CATEGORY_LABELS,
+    EVAL_HISTORY_TURNS,
+    MAX_IMAGES_TO_MODEL,
+    _history_images_from_messages,
     _image_to_model_url,
     _retrieved_images_for_model,
-    _history_images_from_messages,
-    _CATEGORY_LABELS,
-    MAX_IMAGES_TO_MODEL,
-    EVAL_HISTORY_TURNS,
 )
+from graph.state import MultiModalRAGState
+from services.config_service import get_float, get_int
 
 
 def _collect_judge_images(state: MultiModalRAGState) -> list:
@@ -34,7 +35,8 @@ def _collect_judge_images(state: MultiModalRAGState) -> list:
         images.append(state["input_image"])
     images += _retrieved_images_for_model(state.get("kb_images") or [])
     images += _history_images_from_messages(state.get("messages") or [])
-    return [u for u in (_image_to_model_url(i) for i in images) if u][:MAX_IMAGES_TO_MODEL]
+    max_images = get_int("rag.max_images_to_model", MAX_IMAGES_TO_MODEL)
+    return [u for u in (_image_to_model_url(i) for i in images) if u][:max_images]
 
 
 def _build_judge_prompt(state: MultiModalRAGState, images: list) -> str:
@@ -51,7 +53,8 @@ def _build_judge_prompt(state: MultiModalRAGState, images: list) -> str:
     dialog_parts = []
     if summary and summary.strip():
         dialog_parts.append(f"[历史对话摘要]\n{summary}")
-    recent = get_working_window(messages, window_turns=EVAL_HISTORY_TURNS)
+    eval_turns = get_int("evaluate.history_turns", EVAL_HISTORY_TURNS)
+    recent = get_working_window(messages, window_turns=eval_turns)
     if recent:
         dialog_parts.append(f"[最近对话]\n{format_history(recent)}")
     dialog_text = "\n\n".join(dialog_parts) or "(无对话历史)"
@@ -88,12 +91,16 @@ def _build_judge_prompt(state: MultiModalRAGState, images: list) -> str:
    - 编造/幻觉内容 → 低分。
 """
     # 有图时增加"图文一致性"维度(反图片幻觉: 回答对图的描述必须忠于图真实内容)
+    # 关键: 回答"不涉及图片" ≠ 图文不一致, 应给 10 分(无风险), 否则 min() 木桶效应会把
+    # 好的纯文本回答误判低分拉进人工审批(知识蒸馏案例: relevance/faithfulness=10, image_fidelity=5 → 总分 0.5)。
     extra_dim = """3. **图文一致性**: 判断回答中涉及图片的描述是否与图片真实内容一致。
-   - 回答对"用户输入图"的描述应逐点与图片内容核对, 一致 → 高分。
+   - **若回答完全不涉及任何图片内容**(未描述任何图、未引用图中信息), 本维度给 **10 分** ——
+     不存在图文不一致风险, "未描述图"不构成扣分理由。
+   - 回答对"用户输入图"的描述: 逐点与图片内容核对, 一致 → 高分; 编造图中不存在的细节/数字/关系 → 低分。
    - 回答对"知识库引用图"的描述: 系统只向生成器提供了该图的文字描述、未提供原图,
      回答基于文字描述作答是合理行为; 只要不与图片实际内容明显冲突, 不视为幻觉。
+   - 若图片无法加载/内容不可辨, 以回答与检索上下文中该图文字描述的一致性为准, 不因"看不清图"扣分。
    - 编造"图中与文字描述中均不存在"的细节/数字/关系 → 低分。
-   - 若回答不涉及图片内容, 本维度给 5 分(中性)。
 """
     extra_section = f"\n{extra_dim}" if has_image else ""
     json_schema = ('{"relevance": <0-10>, "faithfulness": <0-10>, "image_fidelity": <0-10>}'
@@ -132,20 +139,25 @@ def _build_judge_prompt(state: MultiModalRAGState, images: list) -> str:
 
 
 def _parse_judge_score(raw: str, has_image: bool) -> float:
-    """解析评审 JSON, 三维度取 min(木桶效应)。格式异常/解析失败给 0.5(偏安全走人工审批)。"""
+    """解析评审 JSON, 三维度取 min(木桶效应)。格式异常/解析失败给兜底分(默认 0.5, 偏安全走人工审批)。"""
+    # 兜底与维分默认值从 sys_config 读(hot 生效), 常量作默认值兜底
+    parse_fallback = get_float("evaluate.parse_fallback", 0.5)
+    dim_default = get_int("evaluate.dim_default", 5)
+    image_fidelity_default = get_int("evaluate.image_fidelity_default", 10)
     try:
         json_match = re.search(r'\{[^}]+\}', raw)
         if not json_match:
             logger.warning("LLM Judge 返回格式异常, 原始输出: {}", raw[:200])
-            return 0.5
+            return parse_fallback
         scores = json.loads(json_match.group())
-        relevance = scores.get('relevance', 5) / 10.0
-        faithfulness = scores.get('faithfulness', 5) / 10.0
-        # 有图时读取图文一致性维度; 缺省给中性分(向后兼容旧模型输出)
-        image_fidelity = (scores.get('image_fidelity', 5) / 10.0) if has_image else 1.0
+        relevance = scores.get('relevance', dim_default) / 10.0
+        faithfulness = scores.get('faithfulness', dim_default) / 10.0
+        # 有图时读取图文一致性维度; 缺省给 10(视为无图文不一致风险: 回答未涉及图或已核对),
+        # 避免旧模型漏输出该字段时默认 5 被 min() 木桶效应误判低分(知识蒸馏案例根因)
+        image_fidelity = (scores.get('image_fidelity', image_fidelity_default) / 10.0) if has_image else 1.0
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning("LLM Judge 评分解析失败: {}, 原始输出: {}", e, raw[:200])
-        return 0.5
+        return parse_fallback
 
     if has_image:
         logger.info("LLM Judge 评分 - relevance: {:.1f}, faithfulness: {:.1f}, image_fidelity: {:.1f}",
@@ -177,6 +189,16 @@ async def evaluate_answer(state: MultiModalRAGState, config: RunnableConfig):
         logger.info("[节点] evaluate_answer 开始: 有文本={}, 有图片={}, context={} 条, 回答预览={}",
                     bool(state.get("input_text")), has_judge_image,
                     len(state.get("kb_context") or []), answer_preview)
+
+        # 检索图可观测: 打印检索到的图片路径 + 图文 context 描述, 便于定位 judge 依据哪张图
+        img_ctx = [
+            f"{h.get('filename') or '?'}: {(h.get('text') or '')[:80]}"
+            for h in (state.get("kb_context") or []) if h.get("category") == "image"
+        ]
+        logger.info("[评估] 检索图 {} 张(kb_images): {}{}",
+                    len(state.get("kb_images") or []),
+                    (state.get("kb_images") or [])[:10],
+                    f"; 图文描述: {img_ctx}" if img_ctx else "")
 
         # 有图时评审需多模态(用 multiModal_llm), 纯文本用独立 judge_llm(消除自评偏置)
         judge = multiModal_llm if has_judge_image else judge_llm

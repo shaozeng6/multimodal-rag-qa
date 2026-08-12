@@ -152,7 +152,11 @@ npm run dev               # http://localhost:5173
 
 ## 环境变量
 
-所有配置集中在 `backend/.env`(模板见 `backend/.env.example`):
+所有**基础设施**配置集中在 `backend/.env`(模板见 `backend/.env.example`)。
+
+> ⚙️ **运行参数已迁移到「系统设置」页**(schema_v3 配置中心, 2026-08-11):召回 topK、分片字符数、
+> 评估阈值、模型型号/温度、上下文窗口等**不再由 .env/代码控制**, 改为管理员在系统设置页可视化配置,
+> 落库 `sys_config` 表并热加载生效(hot 组保存即生效, model 组重启生效)。见下文「系统设置」。
 
 | 类别 | 变量 | 说明 |
 |---|---|---|
@@ -161,16 +165,40 @@ npm run dev               # http://localhost:5173
 | | `MILVUS_URI` | Milvus 地址(服务或本地文件) |
 | 认证 | `JWT_SECRET` / `JWT_ALGORITHM` / `JWT_EXPIRE_MINUTES` | JWT 签发与有效期 |
 | LLM | `LLM_BASE_URL` / `LLM_API_KEY` | 生成模型端点 |
-| | `JUDGE_LLM_MODEL` | 独立评审模型(生产建议与生成模型不同系列) |
-| RAG 工作流 | `RAG_WINDOW_TURNS` / `RAG_SUMMARY_TRIGGER_TURNS` / `RAG_SUMMARY_MAX_CHARS` | 上下文窗口与摘要压缩 |
-| | `EVALUATE_THRESHOLD` | 评估通过阈值(低于则人工审批) |
-| | `RAG_TERM_MAPPING_PATH` | 术语归一化映射表(JSON) |
+| 入库管道 | `OCR_VLLM_IP` / `OCR_VLLM_PORT` / `OCR_VLLM_MODEL` | OCR 服务 |
 | 入库管道 | `OCR_VLLM_IP` / `OCR_VLLM_PORT` / `OCR_VLLM_MODEL` | OCR 服务 |
 | | `INGEST_OUTPUT_DIR` / `INGEST_IMAGES_DIR` / `INGEST_TMP_DIR` | 中间产物目录 |
 | | `INGEST_OCR_THREADS` / `INGEST_OCR_DPI` | OCR 并发与分辨率 |
 | 图片存储 | `UPLOAD_IMAGES_DIR` | 消息图片落盘目录(经 `/uploads` 静态暴露) |
 | | `KB_IMAGE_ROOTS` | 额外允许 `/api/files` 提供的图片根目录(分号分隔) |
 | 其他 | `CORS_ORIGINS` | 允许的前端来源(逗号分隔) |
+
+## 系统设置(管理员)
+
+管理员顶栏「系统设置」页(schema_v3)提供运行参数的可视化配置, 落库 `sys_config` 表:
+
+- **分组**:入库 / 检索 / 评估 / 上下文 / 图片上限, 组内按逻辑子域(分片/向量化/候选数/融合/阈值…)
+  分组渲染, 按组保存与恢复默认值。
+- **生效方式**:全部「即时生效」(保存即写入并热加载)。
+- **可视化配置边界(勿过度)**:只收录真正需要调参且已接线的运行参数——检索召回(topK)、评估阈值、
+  分片字符数、上下文窗口、图片上限。**模型型号/温度/维度、OCR 线程/DPI、限流等基础设施配置归属 `.env`**
+  (重启级, 见上节), 不在设置页。
+- **实现**:`backend/models/config.py` + `backend/services/config_service.py`(内存缓存+懒加载),
+  默认值单一事实来源在 `backend/core/config_defaults.py`, 新增配置项在此登记。
+
+## 知识库管理(管理员)
+
+「知识库管理」页除上传/文档/chunk 外, 现支持:
+
+- **文件列表 = 已入库文档 + 进行中任务**:上传的文件**直接出现在文件列表**, 进行中/失败/已取消的任务行内嵌**进度条 + 管道步骤条**(解析:上传→OCR→分片 ‖ 索引:描述→向量化→入库, 分阶段显示完成/进行中/待执行)与阶段文案, 无需单独的"入库任务"页。
+- **两段式管道(可复用)**:解析(OCR/分片)产物 **chunks.json 落盘**, 索引(描述/向量化/入库)从落盘读取——**换嵌入模型/重跑索引不必重新 OCR/分片**; 失败重试自动只重跑失败段(索引失败重试跳过解析)。
+- **手动控制(分步)**:上传时勾选「手动控制(分步)」, 上传后**停在列表不做任何处理**, 分别点「**解析**」(OCR/分片) → 完成后点「**入库**」(描述/向量化/写入) 两段手动执行; 解析完成停在「待入库」, 可一直放着。
+- **行内操作**:进行中任务可**暂停**(阶段边界+向量化循环内逐条)、**继续**、**取消**; 失败/已取消任务可**删除**(清记录+中间产物)或**重试**(复用原 job_id, 只重跑失败段); 每行可看**任务日志**。
+- **先不处理**:上传时勾选「上传后先不处理」, 任务停在首阶段(如先只上传、暂不 OCR), 之后在列表点「继续」。
+- **中间数据清理**:成功/取消后自动清理该任务 OCR md 目录与临时 PDF; 图片目录(md5 共享)保留。
+- **文档统计**:文档列表与详情展示 chunk 数、图片数、**字符数**(文本块字符数展示)、源文件大小;
+  按状态/关键字筛选; 文档内每个 chunk 展示字符数。
+- **知识库统计条**:文档数 / 向量数 / 总字符数 / 失败任务数 / Milvus 状态。
 
 ## API 概览
 
@@ -188,12 +216,17 @@ npm run dev               # http://localhost:5173
 | POST | `/sessions/{id}/chat` | 对话(SSE 流式) |
 | POST | `/sessions/{id}/approve` | 人工审批(通过 / 驳回重生成) |
 | POST | `/knowledge/upload` | 上传 PDF 触引入库任务 |
-| GET | `/knowledge/jobs` | 入库任务列表 |
-| GET | `/knowledge/jobs/{id}` | 入库任务状态 |
-| GET | `/knowledge/status` | 知识库统计(文档数 / 向量数) |
-| GET | `/knowledge/documents` | 已入库文档分页列表(搜索 / 分页) |
-| GET | `/knowledge/documents/{id}/chunks` | 某文档的 chunk 明细(文本 / 图片) |
+| GET | `/knowledge/jobs` | 入库任务列表(按状态筛选) |
+| GET | `/knowledge/jobs/{id}` | 入库任务状态(含进度 / 阶段明细 / 日志) |
+| POST | `/knowledge/jobs/{id}/retry` | 重试失败入库任务(复用原 job_id) |
+| POST | `/knowledge/jobs/{id}/cancel` | 取消 running/pending 任务(协作式) |
+| GET | `/knowledge/status` | 知识库统计(文档数 / 向量数 / 字符数 / 失败任务) |
+| GET | `/knowledge/documents` | 已入库文档分页列表(搜索 / 状态 / 类型筛选) |
+| GET | `/knowledge/documents/{id}/chunks` | 某文档的 chunk 明细(文本 / 图片, 含字符数) |
 | DELETE | `/knowledge/documents/{id}` | 删除文档(含 Milvus 向量与磁盘产物) |
+| GET | `/config` | 系统设置:分组返回全部运行参数(仅管理员) |
+| PUT | `/config` | 批量更新运行参数(仅管理员) |
+| POST | `/config/{group}/reset` | 恢复某组默认值(仅管理员) |
 | GET | `/files` | 图片服务(带路径穿越校验) |
 | GET | `/health` | 健康检查 |
 
@@ -210,12 +243,28 @@ npm run dev               # http://localhost:5173
 | `done` | 回答完成(携带最终文本、引用证据、置信分) |
 | `error` | 执行异常 |
 
+## 工程化工具
+
+静态检查与格式化(不跑业务测试, 提交/改动前建议先过一遍):
+
+```bash
+# 后端: Python lint(ruff, 查未用导入/未定义/常见 bug) + 格式化
+cd backend && ruff check . && ruff format --check .
+
+# 前端: ESLint(lint) + Prettier(格式) + vue-tsc(类型)
+cd frontend && npm run lint && npm run format:check && npm run type-check
+```
+
+- 后端规则集中在 `backend/pyproject.toml`(`dots_ocr` 第三方库排除)。
+- 前端规则在 `frontend/.eslintrc.cjs` + `frontend/.prettierrc`;自动修复用 `npm run lint:fix` / `npm run format`。
+- 改动代码后保持上述命令通过;CI(如后续接入)会在此基础上自动门禁。
+
 ## 生产部署注意
 
 - **Redis**:checkpointer 依赖 RediSearch + RedisJSON,须使用 **Redis 8.0+ 或 Redis Stack**;生产建议开启持久化(RDB/AOF),否则服务重启会丢失工作流状态与中断进度。Redis 不可用时自动降级为 `InMemorySaver`(仅开发用)。
 - **凭据**:`.env` 中 `JWT_SECRET`、`LLM_API_KEY`、`MYSQL_URL` 的默认值仅用于本地开发,上线前必须替换;首次启动自动创建的 `admin/admin123` 请立即改密。
 - **数据库**:表结构首次启动自动创建;`backend/db/schema_v2.sql` 提供参考 DDL。
-- **评估模型**:生产建议 `JUDGE_LLM_MODEL` 与生成模型**不同系列**,避免自评偏置。
+- **评估模型**:生产建议评审模型(`model.judge`,系统设置页配置)与生成模型**不同系列**,避免自评偏置。
 - **图片目录**:`/uploads` 与 `/api/files` 对外暴露图片文件,部署时注意访问权限与 `KB_IMAGE_ROOTS` 配置范围。
 
 ## License

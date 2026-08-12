@@ -1,14 +1,14 @@
 """FastAPI 依赖注入:获取当前登录用户。"""
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import jwt
-from loguru import logger
 
+from core.security import verify_token
 from db.mysql import get_db
 from models.user import User
-from core.security import verify_token
 
 # OAuth2 密码模式的 token 获取地址
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")

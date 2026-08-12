@@ -28,3 +28,6 @@ Pillow>=10.0.0
 langchain-text-splitters>=0.3.0
 langchain-experimental>=0.3.0
 tqdm>=4.66.0
+
+# 开发/静态检查
+ruff>=0.16

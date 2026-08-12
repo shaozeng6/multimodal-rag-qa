@@ -10,7 +10,7 @@ import json
 import os
 from typing import List, Optional, Tuple
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 from pydantic import BaseModel, Field
 

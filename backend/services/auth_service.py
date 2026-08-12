@@ -1,12 +1,12 @@
 """认证业务逻辑:登录验证、用户查询。"""
 from typing import Optional
 
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from loguru import logger
 
+from core.security import create_access_token, verify_password
 from models.user import User
-from core.security import verify_password, create_access_token
 
 
 async def authenticate_user(

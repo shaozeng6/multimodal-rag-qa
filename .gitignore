@@ -48,3 +48,6 @@ PROJECT_FLOW.md
 
 # 旧项目迁移的一次性工具(不属公开功能)
 backend/ingestion/backfill_documents.py
+
+# 工程化工具缓存
+backend/.ruff_cache/

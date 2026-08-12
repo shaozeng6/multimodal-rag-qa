@@ -7,13 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
+from api.auth import router as auth_router
+from api.chat import router as chat_router
+from api.config import router as config_router
+from api.files import router as files_router
+from api.knowledge import router as knowledge_router
+from api.sessions import router as sessions_router
 from core.config import settings
 from db.mysql import init_db
-from api.auth import router as auth_router
-from api.sessions import router as sessions_router
-from api.chat import router as chat_router
-from api.knowledge import router as knowledge_router
-from api.files import router as files_router
 from graph.workflow_service import graph, init_checkpointer
 
 
@@ -55,6 +56,7 @@ app.include_router(sessions_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(knowledge_router, prefix="/api")
 app.include_router(files_router, prefix="/api")
+app.include_router(config_router, prefix="/api")
 
 # 静态文件: /uploads → UPLOAD_IMAGES_DIR(消息图片引用可直接加载)
 os.makedirs(settings.UPLOAD_IMAGES_DIR, exist_ok=True)

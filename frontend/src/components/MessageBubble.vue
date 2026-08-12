@@ -1,19 +1,19 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { marked } from 'marked'
-import type { MessageRole, EvidenceItem } from '@/api/chat'
+import { computed, ref } from 'vue';
+import { marked } from 'marked';
+import type { MessageRole, EvidenceItem } from '@/api/chat';
 
 const props = withDefaults(
   defineProps<{
-    role: MessageRole
-    content: string
-    images?: string[]
+    role: MessageRole;
+    content: string;
+    images?: string[];
     /** 引用证据(方案B, AI 消息): 回答引用的知识库图片 */
-    evidence?: EvidenceItem[]
+    evidence?: EvidenceItem[];
     /** 评估置信分(0-100), AI 消息由 done 事件携带 */
-    score?: number
+    score?: number;
     /** 是否处于流式输出中(显示打字光标) */
-    streaming?: boolean
+    streaming?: boolean;
   }>(),
   {
     images: () => [],
@@ -21,17 +21,29 @@ const props = withDefaults(
     score: undefined,
     streaming: false,
   },
-)
+);
 
-const markdownBodyRef = ref<HTMLElement | null>(null)
+const markdownBodyRef = ref<HTMLElement | null>(null);
 
 // 配置 marked: 关闭 mangle, 启用基础换行
-marked.setOptions({ breaks: true, gfm: true })
+marked.setOptions({ breaks: true, gfm: true });
 
-const isHuman = computed(() => props.role === 'human')
+const isHuman = computed(() => props.role === 'human');
+
+/**
+ * evidence 归一化: 历史消息无证据时后端返回 null(非 undefined), 直接 props.evidence 会在
+ * 模板 `evidence.length` 处抛 null.length 异常, 导致 AI 消息整条渲染失败(刷新后只见"我"不见 AI)。
+ */
+const evidenceList = computed<EvidenceItem[]>(() => props.evidence || []);
 
 /** 检索内容N 引用正则: [检索内容N] / (检索内容N) / （检索内容N） */
-const CITE_RE = /[\[（(]检索内容(\d+)[\]）)]/g
+const CITE_RE = /[（(]检索内容(\d+)[\]）)]/g;
+
+/**
+ * 折叠紧邻的重复引用标记: 模型常重复输出引用(如 "部署 [检索内容2][检索内容2]"),
+ * 这里把连续相同的引用折叠成一个, 避免正文出现 [2][2] 这种冗余。
+ */
+const DUP_CITE_RE = /([（(]检索内容(\d+)[\]）)])(?:\s*[（(]检索内容\2[\]）)])+/g;
 
 /**
  * 引用编号映射:
@@ -40,86 +52,87 @@ const CITE_RE = /[\[（(]检索内容(\d+)[\]）)]/g
  * - 流式期间证据未到, 先按出现顺序临时编号, done 后由证据一次性覆盖收敛。
  */
 const citeSeqMap = computed(() => {
-  const map = new Map<string, number>()
+  const map = new Map<string, number>();
   // 仅当证据带 indexes(实时消息)才按去重后来源编号; 历史回放无 indexes 时回退按出现顺序
-  const hasIndexes = props.evidence.some((ev) => (ev.indexes ?? []).length)
+  const hasIndexes = evidenceList.value.some((ev) => (ev.indexes ?? []).length);
   if (hasIndexes) {
-    props.evidence.forEach((ev, p) => {
+    evidenceList.value.forEach((ev, p) => {
       for (const idx of ev.indexes ?? []) {
-        if (idx != null && !map.has(String(idx))) map.set(String(idx), p + 1)
+        if (idx != null && !map.has(String(idx))) map.set(String(idx), p + 1);
       }
-    })
-    return map
+    });
+    return map;
   }
-  let seq = 0
+  let seq = 0;
   for (const m of props.content.matchAll(CITE_RE)) {
-    const n = m[1]
-    if (!map.has(n)) map.set(n, ++seq)
+    const n = m[1];
+    if (!map.has(n)) map.set(n, ++seq);
   }
-  return map
-})
+  return map;
+});
 
 /** 证据项的来源编号(卡片角标, 与正文徽标对应) */
 function citeSeq(index?: number): string {
-  if (index == null) return ''
-  return String(citeSeqMap.value.get(String(index)) ?? '')
+  if (index == null) return '';
+  return String(citeSeqMap.value.get(String(index)) ?? '');
 }
 
 /** 把 [检索内容N] 渲染成句子右上角的 [seq] 引用徽标(seq 按去重后来源编号) */
 function renderCitations(md: string): string {
-  return md.replace(CITE_RE, (_m, n: string) => {
-    const seq = citeSeqMap.value.get(n) ?? 0
-    return `<sup class="cite-badge" data-cite="${n}" title="引用证据 ${seq}">[${seq}]</sup>`
-  })
+  const cleaned = md.replace(DUP_CITE_RE, '$1'); // 先折叠紧邻重复引用
+  return cleaned.replace(CITE_RE, (_m, n: string) => {
+    const seq = citeSeqMap.value.get(n) ?? 0;
+    return `<sup class="cite-badge" data-cite="${n}" title="引用证据 ${seq}">[${seq}]</sup>`;
+  });
 }
 
 // 将 Markdown 渲染为 HTML(先替换引用徽标)
 const renderedHtml = computed(() => {
-  if (!props.content) return ''
-  return marked.parse(renderCitations(props.content)) as string
-})
+  if (!props.content) return '';
+  return marked.parse(renderCitations(props.content)) as string;
+});
 
 /** 点击引用徽标 → 滚动并高亮对应的证据图(同一图可能被多个编号引用) */
 function handleMarkdownClick(e: Event): void {
-  const target = (e.target as HTMLElement).closest?.('.cite-badge') as HTMLElement | null
-  if (!target) return
-  const n = Number(target.dataset.cite)
-  if (!n || !props.evidence.length) return
-  const pos = props.evidence.findIndex((ev) => (ev.indexes ?? []).includes(n))
-  if (pos < 0) return
-  const root = markdownBodyRef.value?.closest('.bubble')
-  const item = root?.querySelector(`[data-evidence-idx="${pos}"]`)
-  item?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-  item?.classList.add('flash')
-  window.setTimeout(() => item?.classList.remove('flash'), 1600)
+  const target = (e.target as HTMLElement).closest?.('.cite-badge') as HTMLElement | null;
+  if (!target) return;
+  const n = Number(target.dataset.cite);
+  if (!n || !evidenceList.value.length) return;
+  const pos = evidenceList.value.findIndex((ev) => (ev.indexes ?? []).includes(n));
+  if (pos < 0) return;
+  const root = markdownBodyRef.value?.closest('.bubble');
+  const item = root?.querySelector(`[data-evidence-idx="${pos}"]`);
+  item?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  item?.classList.add('flash');
+  window.setTimeout(() => item?.classList.remove('flash'), 1600);
 }
 
 // 图片预览列表(ElImage 需要 string[])
-const previewList = computed(() => props.images || [])
+const previewList = computed(() => props.images || []);
 
 // 证据区中的图片项(文本来源不含 url, 单独筛出供 el-image 预览)
-const evidenceImages = computed(() => props.evidence.filter((e) => e.type !== 'text'))
-const evidenceImageUrls = computed(() => evidenceImages.value.map((e) => e.url ?? ''))
+const evidenceImages = computed(() => evidenceList.value.filter((e) => e.type !== 'text'));
+const evidenceImageUrls = computed(() => evidenceImages.value.map((e) => e.url ?? ''));
 
 // 头像文字
-const avatarText = computed(() => (isHuman.value ? '我' : 'AI'))
+const avatarText = computed(() => (isHuman.value ? '我' : 'AI'));
 
 // ---- 置信章: 仅 AI 消息且已结束流式且带分数时展示 ----
 const showStamp = computed(
   () => props.role === 'ai' && !props.streaming && typeof props.score === 'number',
-)
+);
 const stampTone = computed(() => {
-  const s = props.score ?? 0
-  if (s >= 80) return 'high'
-  if (s >= 60) return 'mid'
-  return 'low'
-})
+  const s = props.score ?? 0;
+  if (s >= 80) return 'high';
+  if (s >= 60) return 'mid';
+  return 'low';
+});
 const stampLabel = computed(() => {
-  const s = props.score ?? 0
-  if (s >= 80) return '高可信'
-  if (s >= 60) return '中等'
-  return '低可信'
-})
+  const s = props.score ?? 0;
+  if (s >= 80) return '高可信';
+  if (s >= 60) return '中等';
+  return '低可信';
+});
 </script>
 
 <template>
@@ -163,11 +176,11 @@ const stampLabel = computed(() => {
         <div v-else class="empty-content">（无内容）</div>
 
         <!-- 引用证据区(方案B): 仅 AI 消息展示回答引用的来源(图片缩略图 + 文本来源卡片) -->
-        <div v-if="!isHuman && evidence.length" class="evidence-area">
+        <div v-if="!isHuman && evidenceList.length" class="evidence-area">
           <div class="evidence-title">⚑ 引用证据</div>
           <div class="evidence-row">
             <div
-              v-for="(ev, idx) in evidence"
+              v-for="(ev, idx) in evidenceList"
               :key="idx"
               class="evidence-item"
               :class="{ 'is-text': ev.type === 'text' }"
@@ -188,7 +201,9 @@ const stampLabel = computed(() => {
                   <div class="evidence-card-file">📄 {{ ev.label || ev.filename || '文档' }}</div>
                   <div v-if="ev.text" class="evidence-card-snippet">{{ ev.text }}</div>
                 </div>
-                <span v-if="citeSeq(ev.indexes?.[0])" class="evidence-num">{{ citeSeq(ev.indexes?.[0]) }}</span>
+                <span v-if="citeSeq(ev.indexes?.[0])" class="evidence-num">{{
+                  citeSeq(ev.indexes?.[0])
+                }}</span>
               </div>
               <span v-if="ev.type !== 'text'" class="evidence-name">{{ ev.filename }}</span>
             </div>
@@ -322,7 +337,7 @@ const stampLabel = computed(() => {
     width: 200px;
     border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: var(--radius-sm);
-    background: rgba(194, 154, 59, 0.04);
+    background: rgba(37, 99, 235, 0.05);
     padding: 8px 10px;
 
     .evidence-card-file {
@@ -354,8 +369,8 @@ const stampLabel = computed(() => {
     height: 15px;
     padding: 0 3px;
     border-radius: 4px;
-    background: rgba(27, 24, 20, 0.78);
-    color: #f0e6cf;
+    background: var(--brass);
+    color: #ffffff;
     font-family: var(--font-mono);
     font-size: 10px;
     font-weight: 600;
@@ -384,10 +399,10 @@ const stampLabel = computed(() => {
 
 @keyframes evidence-flash {
   0% {
-    box-shadow: 0 0 0 4px rgba(194, 154, 59, 0.35);
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.35);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(194, 154, 59, 0);
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
   }
 }
 
@@ -400,22 +415,24 @@ const stampLabel = computed(() => {
   word-break: break-word;
 }
 
-// 用户: 墨色紧凑块(无渐变)
+// 用户: 品牌蓝紧凑块(企业常规形态)
 .bubble-human {
-  background: var(--surface-2);
-  color: var(--ink-text);
-  border: 1px solid var(--hairline);
+  background: var(--brass);
+  color: #ffffff;
+  border: none;
   border-top-right-radius: 4px;
+  box-shadow: var(--shadow-card);
 }
 
-// AI: 纸面卡片 + 左侧黄铜证据轨
+// AI: 白色卡片 + 左侧蓝色证据轨
 .bubble-ai {
   background: var(--paper);
   color: var(--paper-ink);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--hairline);
   border-left: 3px solid var(--brass);
   border-top-left-radius: 4px;
   padding-top: 34px; // 给右上置信章留位
+  box-shadow: var(--shadow-card);
 }
 
 // ---- 置信章(签名元素) ----
@@ -442,15 +459,15 @@ const stampLabel = computed(() => {
 
   &.stamp-high {
     color: var(--brass);
-    background: rgba(194, 154, 59, 0.08);
+    background: rgba(37, 99, 235, 0.09);
   }
   &.stamp-mid {
-    color: #9c7d2f;
-    background: rgba(199, 162, 74, 0.1);
+    color: #b45309;
+    background: rgba(217, 119, 6, 0.1);
   }
   &.stamp-low {
-    color: #a04a3f;
-    background: rgba(194, 102, 90, 0.1);
+    color: #dc2626;
+    background: rgba(220, 38, 38, 0.1);
   }
 }
 
@@ -494,12 +511,13 @@ const stampLabel = computed(() => {
       margin: 2px 0;
     }
     code {
-      background: rgba(0, 0, 0, 0.07);
+      background: #f1f5f9;
+      border: 1px solid var(--hairline);
       padding: 2px 6px;
       border-radius: 4px;
       font-family: var(--font-mono);
       font-size: 13px;
-      color: #7a5220;
+      color: #0f172a;
     }
     // 引用徽标: 句子右上角的 [N](由 (检索内容N) 渲染而来, 点击跳证据)
     sup.cite-badge {
@@ -511,8 +529,8 @@ const stampLabel = computed(() => {
       padding: 0 3px;
       margin: 0 1px;
       border-radius: 4px;
-      background: rgba(194, 154, 59, 0.12);
-      border: 1px solid rgba(194, 154, 59, 0.35);
+      background: rgba(37, 99, 235, 0.12);
+      border: 1px solid rgba(37, 99, 235, 0.35);
       color: var(--brass);
       font-family: var(--font-mono);
       font-size: 10px;
@@ -522,17 +540,19 @@ const stampLabel = computed(() => {
       vertical-align: super;
       transition: background 0.15s;
       &:hover {
-        background: rgba(194, 154, 59, 0.22);
+        background: rgba(37, 99, 235, 0.22);
       }
     }
     pre {
-      background: rgba(0, 0, 0, 0.08);
+      background: #f8fafc;
+      border: 1px solid var(--hairline);
       padding: 12px;
       border-radius: var(--radius-sm);
       overflow-x: auto;
       margin: 0 0 8px;
       code {
         background: transparent;
+        border: none;
         padding: 0;
         color: var(--paper-ink);
       }
@@ -541,26 +561,26 @@ const stampLabel = computed(() => {
       border-left: 3px solid var(--brass);
       padding-left: 12px;
       margin: 8px 0;
-      color: #6b6558;
+      color: var(--muted);
     }
     a {
-      color: #8a6a1e;
+      color: var(--brass);
     }
     table {
       border-collapse: collapse;
       margin: 8px 0;
       th,
       td {
-        border: 1px solid rgba(0, 0, 0, 0.15);
+        border: 1px solid var(--hairline);
         padding: 6px 10px;
       }
       th {
-        background: rgba(0, 0, 0, 0.05);
+        background: #f8fafc;
       }
     }
     hr {
       border: none;
-      border-top: 1px solid rgba(0, 0, 0, 0.15);
+      border-top: 1px solid var(--hairline);
       margin: 12px 0;
     }
   }

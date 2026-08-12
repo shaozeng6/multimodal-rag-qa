@@ -10,13 +10,14 @@ from typing import Dict, List, Optional
 from loguru import logger
 
 from graph.llm_init import (
-    call_dashscope_once,
-    normalize_image,
-    milvus_client,
     COLLECTION_NAME,
+    call_dashscope_once,
+    milvus_client,
+    normalize_image,
 )
+from services.config_service import get_float, get_int
 
-MAX_RETRIES = 3
+MAX_RETRIES = 3  # 默认值兜底, 运行时由 sys_config 覆盖
 BASE_BACKOFF = 1.0  # 秒
 
 
@@ -26,6 +27,8 @@ def process_item(item: Dict) -> Optional[Dict]:
     失败返回 None(调用方剔除该项), 不写空 dense: 空向量与维数不符会令 Milvus
     整批插入抛错, 使整个 job 判 error(数分钟 OCR 成果作废)。
     """
+    max_retries = get_int("ingestion.embed_retries", MAX_RETRIES)
+    base_backoff = get_float("ingestion.embed_backoff", BASE_BACKOFF)
     new_item = item.copy()
     raw_content = (new_item.get('text') or '').strip()
     image_raw = (new_item.get('image_path') or '').strip()
@@ -38,9 +41,9 @@ def process_item(item: Dict) -> Optional[Dict]:
 
     ok, embedding, status_code, retry_after = call_dashscope_once(input_data)
     attempts = 1
-    while not ok and attempts < MAX_RETRIES:
+    while not ok and attempts < max_retries:
         # 429 时按 Retry-After 等待, 否则指数退避
-        sleep_sec = retry_after or (BASE_BACKOFF * (2 ** (attempts - 1)))
+        sleep_sec = retry_after or (base_backoff * (2 ** (attempts - 1)))
         logger.warning("[入库] 向量化失败(status={}), {}s 后第 {} 次重试",
                        status_code, round(sleep_sec, 2), attempts)
         time.sleep(sleep_sec)
@@ -107,12 +110,14 @@ def query_milvus_ids_by_filename(filename: str) -> List[int]:
 
 def _chunk_to_dict(h: dict) -> dict:
     """Milvus 命中实体 → chunk 展示 dict(image_path 由调用方 resolve 成 URL)。"""
+    text = h.get("text") or ""
     return {
         "id": h.get("id"),
-        "text": h.get("text") or "",
+        "text": text,
         "category": h.get("category") or "unknown",
         "image_path": h.get("image_path") or None,
         "title": h.get("title") or "",
+        "char_count": len(text),  # 展示用, 不落库; 图片 chunk = 描述长度
     }
 
 

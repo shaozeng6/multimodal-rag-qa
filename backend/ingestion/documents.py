@@ -12,9 +12,9 @@ from loguru import logger
 from sqlalchemy import func, select
 
 from core.config import settings
-from models.ingestion import KnowledgeDocument
-from models.user import User
 from ingestion.sync_db import SyncSession
+from models.ingestion import IngestJob, KnowledgeDocument
+from models.user import User
 
 
 def _doc_to_dict(doc: KnowledgeDocument, uploader_name: Optional[str] = None) -> dict:
@@ -31,6 +31,8 @@ def _doc_to_dict(doc: KnowledgeDocument, uploader_name: Optional[str] = None) ->
         "status": doc.status,
         "chunk_count": doc.chunk_count or 0,
         "image_count": doc.image_count or 0,
+        "char_count": doc.char_count or 0,
+        "file_size": doc.file_size or 0,
         "file_md5": doc.file_md5,
         "uploaded_by": doc.uploaded_by,
         "uploader_name": uploader_name,
@@ -49,10 +51,14 @@ def record_document(
     image_count: int,
     status: str = "ingested",
     milvus_ids: Optional[List[int]] = None,
+    char_count: int = 0,
+    file_size: int = 0,
 ) -> None:
     """记录一个入库成功的文档(失败不入库, 失败详情看 ingest_jobs.error)。
 
     milvus_ids: write_to_milvus 返回的 Milvus 主键, 供文档级精确删除。
+    char_count: 文本类 chunk 字符数合计(含图片/表格描述), 供管理页展示。
+    file_size: 源文件字节数(上传接口记录)。
     """
     with SyncSession() as db:
         db.add(KnowledgeDocument(
@@ -65,10 +71,12 @@ def record_document(
             file_md5=file_md5,
             uploaded_by=user_id,
             milvus_ids=milvus_ids,
+            char_count=char_count,
+            file_size=file_size,
         ))
         db.commit()
-    logger.info("[入库] 文档元数据已记录: filename={}, chunks={}, images={}",
-                filename, chunk_count, image_count)
+    logger.info("[入库] 文档元数据已记录: filename={}, chunks={}, images={}, chars={}",
+                filename, chunk_count, image_count, char_count)
 
 
 def count_documents() -> int:
@@ -79,8 +87,9 @@ def count_documents() -> int:
         ).scalar_one() or 0
 
 
-def list_documents(page: int = 1, page_size: int = 20, keyword: str = "") -> Tuple[List[dict], int]:
-    """知识文档分页列表(按创建时间倒序), keyword 按 filename 模糊过滤。
+def list_documents(page: int = 1, page_size: int = 20, keyword: str = "",
+                   status: str = "", filetype: str = "") -> Tuple[List[dict], int]:
+    """知识文档分页列表(按创建时间倒序), keyword 按 filename 模糊过滤, status/filetype 精确筛选。
 
     Returns:
         (items, total): items 为 _doc_to_dict 序列化结果, 含 uploader_name(join users)。
@@ -96,12 +105,78 @@ def list_documents(page: int = 1, page_size: int = 20, keyword: str = "") -> Tup
             like = f"%{keyword}%"
             count_q = count_q.where(KnowledgeDocument.filename.like(like))
             q = q.where(KnowledgeDocument.filename.like(like))
+        if status:
+            count_q = count_q.where(KnowledgeDocument.status == status)
+            q = q.where(KnowledgeDocument.status == status)
+        if filetype:
+            count_q = count_q.where(KnowledgeDocument.filetype == filetype)
+            q = q.where(KnowledgeDocument.filetype == filetype)
         total = db.execute(count_q).scalar_one() or 0
         rows = db.execute(
             q.offset((page - 1) * page_size).limit(page_size)
         ).all()
         items = [_doc_to_dict(doc, uploader_name) for doc, uploader_name in rows]
         return items, total
+
+
+def list_uploads(page: int = 1, page_size: int = 20, keyword: str = "",
+                 status: str = "") -> Tuple[List[dict], int]:
+    """合并「进行中/失败/已取消的入库任务」+「已入库文档」为一个统一列表(按时间倒序)。
+
+    供知识库管理页文件列表展示: 上传中的文件也出现在列表里, 带阶段状态与进度, 无需单独的"入库任务"页。
+    - 任务侧: ingest_jobs 中非 success 状态(尚未生成 knowledge_documents 行)
+    - 文档侧: knowledge_documents(与 success 任务 1:1)
+    - 任务行带 kind=job + job 字段(progress/stage/stage_detail/run_mode/paused/error/log)
+    - status 参数: 逗号分隔, 同时匹配 job.status 与 doc.status
+    """
+    from ingestion.jobs import _job_to_dict  # 复用任务序列化(含 paused/log)
+
+    with SyncSession() as db:
+        job_rows = db.execute(
+            select(IngestJob).where(
+                IngestJob.status.in_(("pending", "running", "error", "cancelled"))
+            )
+        ).scalars().all()
+        doc_rows = db.execute(
+            select(KnowledgeDocument, User.username)
+            .outerjoin(User, KnowledgeDocument.uploaded_by == User.id)
+        ).all()
+
+    entries: list = []
+    for j in job_rows:
+        d = _job_to_dict(j)
+        d["kind"] = "job"
+        d["chunk_count"] = None
+        d["image_count"] = None
+        d["char_count"] = None
+        d["file_size"] = None
+        d["uploader_name"] = None
+        entries.append(d)
+    for doc, uploader_name in doc_rows:
+        d = _doc_to_dict(doc, uploader_name)
+        d["kind"] = "doc"
+        entries.append(d)
+
+    if keyword:
+        kw = keyword.lower()
+        entries = [e for e in entries if kw in (e.get("filename") or "").lower()]
+    if status:
+        status_list = [s.strip() for s in status.split(",") if s.strip()]
+        if status_list:
+            entries = [e for e in entries if (e.get("status") or "") in status_list]
+
+    entries.sort(key=lambda e: e.get("created_at") or "", reverse=True)
+    total = len(entries)
+    start = (page - 1) * page_size
+    return entries[start:start + page_size], total
+
+
+def sum_char_count() -> int:
+    """全部文档字符数合计(供知识库统计)。"""
+    with SyncSession() as db:
+        return db.execute(
+            select(func.coalesce(func.sum(KnowledgeDocument.char_count), 0))
+        ).scalar_one() or 0
 
 
 def get_document(doc_id: int) -> Optional[dict]:

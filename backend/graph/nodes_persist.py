@@ -9,16 +9,17 @@ from typing import Optional
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
 
-from graph.state import MultiModalRAGState
+from core.config import settings
 from graph.context import (
     append_pair,
     build_human_text,
-    input_modality,
     compress_summary,
+    input_modality,
 )
 from graph.llm_init import rewriter_llm
-from core.config import settings
 from graph.milvus_writer import get_milvus_writer
+from graph.state import MultiModalRAGState
+from services.config_service import get_float
 
 
 def _build_trace(state: MultiModalRAGState, duration_ms: Optional[int]) -> dict:
@@ -66,7 +67,9 @@ def _should_memoize(state: MultiModalRAGState) -> bool:
     score = state.get("evaluate_score")
     if score is None:
         return False
-    return float(score) >= settings.EVALUATE_THRESHOLD
+    # 阈值从 sys_config 读(hot 生效), settings.EVALUATE_THRESHOLD 作兜底
+    threshold = get_float("evaluate.threshold", settings.EVALUATE_THRESHOLD)
+    return float(score) >= threshold
 
 
 async def persist_context_node(state: MultiModalRAGState, config: RunnableConfig):

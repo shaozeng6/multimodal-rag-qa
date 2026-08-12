@@ -2,9 +2,9 @@
 import uuid
 from typing import List, Optional
 
-from sqlalchemy import select, delete
-from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.session import Session
 
@@ -125,6 +125,7 @@ async def _generate_image_title(image_url: str) -> str:
     """用多模态 LLM 看图生成简短标题(不超过 20 字)。"""
     try:
         from langchain_core.messages import HumanMessage
+
         from graph.llm_init import multiModal_llm
 
         message = HumanMessage(content=[

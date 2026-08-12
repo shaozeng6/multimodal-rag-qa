@@ -17,10 +17,10 @@ from loguru import logger
 from pymilvus import DataType, Function, FunctionType
 
 from graph.llm_init import (
-    milvus_client,
     COLLECTION_NAME,
     CONTEXT_COLLECTION_NAME,
     EMBEDDING_DIMENSIONS,
+    milvus_client,
 )
 
 # BM25 倒排索引参数(与旧项目一致)

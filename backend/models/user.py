@@ -1,7 +1,7 @@
 """User SQLAlchemy 模型。"""
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, Enum, DateTime
+from sqlalchemy import Column, DateTime, Enum, Integer, String
 
 from db.mysql import Base
 

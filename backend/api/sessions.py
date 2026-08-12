@@ -3,25 +3,26 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from loguru import logger
 
+from core.config import settings
+from core.deps import get_current_user
 from db.mysql import get_db
 from models.user import User
-from core.deps import get_current_user
-from core.config import settings
-from services.session_service import (
-    list_sessions,
-    create_session,
-    get_session,
-    delete_session,
-    rename_session,
-)
 from services.message_service import (
-    list_messages,
-    list_message_images,
     list_message_evidence,
+    list_message_images,
+    list_message_scores,
+    list_messages,
+)
+from services.session_service import (
+    create_session,
+    delete_session,
+    get_session,
+    list_sessions,
+    rename_session,
 )
 
 router = APIRouter(prefix="/sessions", tags=["会话"])
@@ -70,6 +71,8 @@ class MessageResponse(BaseModel):
     images: List[str] = []
     # 引用证据(方案B, AI 消息): 历史回放还原证据区; 老消息无则 None
     evidence: Optional[List[dict]] = None
+    # 评估置信分(0-100, AI 消息): 历史回放还原置信章; 无则 None
+    score: Optional[float] = None
     created_at: Optional[datetime] = None
 
 
@@ -136,6 +139,8 @@ async def get_session_messages(
     images_by_msg = await list_message_images(session_id)
     # 方案B: 引用证据从 message_traces.evidence 读取(历史回放还原证据区)
     evidence_by_msg = await list_message_evidence(session_id)
+    # 置信分从 message_traces.evaluate_score 读取(0-1 → 0-100)
+    scores_by_msg = await list_message_scores(session_id)
     return [
         MessageResponse(
             id=m.id,
@@ -143,6 +148,7 @@ async def get_session_messages(
             content=m.content or "",
             images=images_by_msg.get(m.id, []),
             evidence=evidence_by_msg.get(m.id),
+            score=scores_by_msg.get(m.id),
             created_at=m.created_at,
         )
         for m in messages

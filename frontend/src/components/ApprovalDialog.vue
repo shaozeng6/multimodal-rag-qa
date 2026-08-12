@@ -1,68 +1,68 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { Check, Close } from '@element-plus/icons-vue'
-import type { ApprovalPayload } from '@/api/chat'
+import { computed, ref, watch } from 'vue';
+import { Check, Close } from '@element-plus/icons-vue';
+import type { ApprovalPayload } from '@/api/chat';
 
 const props = defineProps<{
-  visible: boolean
-  approval: ApprovalPayload | null
-}>()
+  visible: boolean;
+  approval: ApprovalPayload | null;
+}>();
 
 const emit = defineEmits<{
-  (e: 'update:visible', val: boolean): void
-  (e: 'approve', reason?: string): void
-  (e: 'reject', reason?: string): void
-}>()
+  (e: 'update:visible', val: boolean): void;
+  (e: 'approve', reason?: string): void;
+  (e: 'reject', reason?: string): void;
+}>();
 
-const remark = ref('')
+const remark = ref('');
 
 // 双向绑定 visible
 const dialogVisible = computed({
   get: () => props.visible,
   set: (val: boolean) => emit('update:visible', val),
-})
+});
 
 // 评估分数(0-100)
 const score = computed(() => {
-  const s = props.approval?.score
-  return typeof s === 'number' ? s : null
-})
+  const s = props.approval?.score;
+  return typeof s === 'number' ? s : null;
+});
 
 // 分数对应的颜色与等级
 const scoreColor = computed(() => {
-  const s = score.value
-  if (s === null) return 'var(--text-secondary)'
-  if (s >= 80) return 'var(--success)'
-  if (s >= 60) return 'var(--warning)'
-  return 'var(--danger)'
-})
+  const s = score.value;
+  if (s === null) return 'var(--text-secondary)';
+  if (s >= 80) return 'var(--success)';
+  if (s >= 60) return 'var(--warning)';
+  return 'var(--danger)';
+});
 
 const scoreLabel = computed(() => {
-  const s = score.value
-  if (s === null) return '未评估'
-  if (s >= 80) return '高可信'
-  if (s >= 60) return '中等'
-  return '低可信'
-})
+  const s = score.value;
+  if (s === null) return '未评估';
+  if (s >= 80) return '高可信';
+  if (s >= 60) return '中等';
+  return '低可信';
+});
 
 // 弹窗打开时重置备注
 watch(
   () => props.visible,
   (val) => {
-    if (val) remark.value = ''
+    if (val) remark.value = '';
   },
-)
+);
 
 /** 通过审批 */
 function handleApprove(): void {
-  emit('approve', remark.value.trim() || undefined)
-  emit('update:visible', false)
+  emit('approve', remark.value.trim() || undefined);
+  emit('update:visible', false);
 }
 
 /** 驳回 */
 function handleReject(): void {
-  emit('reject', remark.value.trim() || undefined)
-  emit('update:visible', false)
+  emit('reject', remark.value.trim() || undefined);
+  emit('update:visible', false);
 }
 </script>
 
@@ -121,20 +121,10 @@ function handleReject(): void {
 
     <template #footer>
       <div class="dialog-footer">
-        <el-button
-          type="danger"
-          :icon="Close"
-          class="reject-btn"
-          @click="handleReject"
-        >
+        <el-button type="danger" :icon="Close" class="reject-btn" @click="handleReject">
           驳回
         </el-button>
-        <el-button
-          type="success"
-          :icon="Check"
-          class="approve-btn"
-          @click="handleApprove"
-        >
+        <el-button type="success" :icon="Check" class="approve-btn" @click="handleApprove">
           通过
         </el-button>
       </div>

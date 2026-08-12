@@ -6,16 +6,18 @@ collections_operator.py / db_retriever.py / tools.py 抽离并适配企业版配
 import os
 import time
 from http import HTTPStatus
-from typing import List, Dict, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
 
 import dashscope
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from loguru import logger
-from pymilvus import MilvusClient, AnnSearchRequest, WeightedRanker
+from pymilvus import AnnSearchRequest, MilvusClient, WeightedRanker
 
 from core.config import settings
 
-# ========= 配置区(均从环境变量读取，提供与原项目一致的默认值) =========
+# ========= 配置区 =========
+# 模型/温度/限流属基础设施配置, 归 .env(core/config.settings / os.getenv), 不进配置中心。
+# core.config 已 load_dotenv(), 故 .env 里的 LLM_MODEL 等对 os.getenv 同样生效(重启后)。
 # 主 LLM 配置
 LLM_BASE_URL = settings.LLM_BASE_URL
 LLM_API_KEY = settings.LLM_API_KEY
@@ -68,6 +70,7 @@ def _make_llm(model: str, *, temperature: float = 0.2, streaming: bool = True,
 
 
 # 主对话 LLM(流式, 生成回答; 供 ingestion/convert 的表格描述等通用文本任务)
+# 温度属基础设施配置, 固定默认值
 llm = _make_llm(LLM_MODEL, temperature=0.2, streaming=True)
 
 # 多模态大模型(对话/图片理解/重生成; 保持原默认温度 0.7 不变)
@@ -182,7 +185,8 @@ limiter = FixedWindowRateLimiter(RPM_LIMIT, WINDOW_SECONDS)
 def image_to_base64(img: str) -> Tuple[str, str]:
     """将图片转换为base64编码"""
     try:
-        import base64, mimetypes
+        import base64
+        import mimetypes
         mime = mimetypes.guess_type(img)[0] or "image/png"
         with open(img, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")

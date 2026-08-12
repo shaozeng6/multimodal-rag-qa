@@ -56,7 +56,7 @@ def _safe_resolve(path: str) -> str | None:
 
     if not os.path.isfile(real):
         return None
-    if not os.path.splitext(real)[1].lower() in _IMAGE_EXTS:
+    if os.path.splitext(real)[1].lower() not in _IMAGE_EXTS:
         return None
     return real
 

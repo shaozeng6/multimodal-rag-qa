@@ -1,67 +1,67 @@
 <script setup lang="ts">
-import { computed, ref, nextTick } from 'vue'
-import { Plus, Search, Delete, EditPen } from '@element-plus/icons-vue'
-import { ElMessageBox } from 'element-plus'
-import type { Session } from '@/api/sessions'
+import { computed, ref, nextTick } from 'vue';
+import { Plus, Search, Delete, EditPen } from '@element-plus/icons-vue';
+import { ElMessageBox } from 'element-plus';
+import type { Session } from '@/api/sessions';
 
 const props = withDefaults(
   defineProps<{
-    sessions: Session[]
-    currentId?: string | null
-    loading?: boolean
+    sessions: Session[];
+    currentId?: string | null;
+    loading?: boolean;
     /** 流式输出中(用于禁用当前会话删除按钮, 避免白弹确认框) */
-    streaming?: boolean
+    streaming?: boolean;
   }>(),
   {
     currentId: null,
     loading: false,
     streaming: false,
   },
-)
+);
 
 const emit = defineEmits<{
-  (e: 'select', id: string): void
-  (e: 'delete', id: string): void
-  (e: 'new'): void
-  (e: 'rename', id: string, title: string): void
-}>()
+  (e: 'select', id: string): void;
+  (e: 'delete', id: string): void;
+  (e: 'new'): void;
+  (e: 'rename', id: string, title: string): void;
+}>();
 
-const keyword = ref('')
+const keyword = ref('');
 
 // 正在编辑的会话 id 和临时标题
-const editingId = ref<string | null>(null)
-const editingTitle = ref('')
-const editInputRef = ref<HTMLInputElement | null>(null)
+const editingId = ref<string | null>(null);
+const editingTitle = ref('');
+const editInputRef = ref<HTMLInputElement | null>(null);
 
 // 关键词过滤会话列表
 const filteredSessions = computed(() => {
-  const kw = keyword.value.trim().toLowerCase()
-  if (!kw) return props.sessions
-  return props.sessions.filter((s) => s.title?.toLowerCase().includes(kw))
-})
+  const kw = keyword.value.trim().toLowerCase();
+  if (!kw) return props.sessions;
+  return props.sessions.filter((s) => s.title?.toLowerCase().includes(kw));
+});
 
 /** 格式化时间 */
 function formatTime(t?: string): string {
-  if (!t) return ''
-  const d = new Date(t)
-  if (Number.isNaN(d.getTime())) return t
-  const now = new Date()
-  const sameDay = d.toDateString() === now.toDateString()
+  if (!t) return '';
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return t;
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
   if (sameDay) {
-    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   }
-  return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+  return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
 }
 
 /** 选中会话 */
 function handleSelect(id: string): void {
-  if (id === props.currentId || editingId.value) return
-  emit('select', id)
+  if (id === props.currentId || editingId.value) return;
+  emit('select', id);
 }
 
 /** 删除会话(弹出确认弹窗) */
 async function handleDelete(e: Event, session: Session): Promise<void> {
-  e.stopPropagation()
+  e.stopPropagation();
   try {
     await ElMessageBox.confirm(
       `确定要删除会话「${session.title || '未命名会话'}」吗？删除后无法恢复。`,
@@ -74,8 +74,8 @@ async function handleDelete(e: Event, session: Session): Promise<void> {
         customClass: 'confirm-box',
         center: true,
       },
-    )
-    emit('delete', session.id)
+    );
+    emit('delete', session.id);
   } catch {
     // 用户取消删除
   }
@@ -83,27 +83,27 @@ async function handleDelete(e: Event, session: Session): Promise<void> {
 
 /** 双击会话标题进入编辑模式 */
 async function handleDoubleClick(session: Session): Promise<void> {
-  editingId.value = session.id
-  editingTitle.value = session.title || ''
-  await nextTick()
-  editInputRef.value?.focus()
-  editInputRef.value?.select()
+  editingId.value = session.id;
+  editingTitle.value = session.title || '';
+  await nextTick();
+  editInputRef.value?.focus();
+  editInputRef.value?.select();
 }
 
 /** 确认重命名 */
 function confirmRename(): void {
   if (editingId.value) {
-    const title = editingTitle.value.trim()
+    const title = editingTitle.value.trim();
     if (title) {
-      emit('rename', editingId.value, title)
+      emit('rename', editingId.value, title);
     }
-    editingId.value = null
+    editingId.value = null;
   }
 }
 
 /** 取消编辑 */
 function cancelRename(): void {
-  editingId.value = null
+  editingId.value = null;
 }
 </script>
 
@@ -226,7 +226,7 @@ function cancelRename(): void {
 
   &.active {
     background: var(--brass-soft);
-    border: 1px solid rgba(194, 154, 59, 0.4);
+    border: 1px solid rgba(37, 99, 235, 0.35);
 
     .session-title {
       color: var(--brass);
