@@ -1,10 +1,10 @@
 # 多模态 RAG 知识库问答系统
 
-**Multimodal RAG Q&A System**
+**多模态 RAG 问答系统**
 
-A multimodal Retrieval-Augmented Generation (RAG) Q&A system built on **FastAPI + LangGraph + Milvus + Vue3**. It supports hybrid text & image retrieval with image-caption bridging, LLM-as-Judge answer evaluation with human-in-the-loop approval, multi-turn context management, and a full ingestion pipeline with OCR. Backend streaming answers over SSE to a Vue3 chat interface.
+基于 **FastAPI + LangGraph + Milvus + Vue3** 的多模态检索增强生成(RAG)问答系统。支持文本与图片(或图文混合)检索及图片语义桥接,LLM-as-Judge 回答质量评估与人工审批,多轮上下文管理,以及带 OCR 的完整入库管道。后端通过 SSE 将流式回答推送给 Vue3 聊天界面。
 
-> 中文文档为主;英文简介见上。项目开发过程中的审计 / 已知问题 / 流程等文档为私有资料,未包含在本仓库中。
+> 项目开发过程中的审计 / 已知问题 / 流程等文档为私有资料,未包含在本仓库中。
 
 ---
 
