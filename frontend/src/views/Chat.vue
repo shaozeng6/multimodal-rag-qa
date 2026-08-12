@@ -290,6 +290,7 @@ onMounted(async () => {
             :images="msg.images"
             :evidence="msg.evidence"
             :score="msg.score"
+            :show-confidence="auth.isAdmin"
             :streaming="
               chatStore.streaming &&
               msg.role === 'ai' &&
@@ -297,8 +298,8 @@ onMounted(async () => {
             "
           />
 
-          <!-- 执行链路: 当前 AI 消息经过的节点(回答完成后仍显示, 直到下一条消息) -->
-          <div v-if="activeAiSteps.length" class="node-steps">
+          <!-- 执行链路(仅管理员): 当前 AI 消息经过的节点(回答完成后仍显示, 直到下一条消息) -->
+          <div v-if="auth.isAdmin && activeAiSteps.length" class="node-steps">
             <template v-for="(step, idx) in activeAiSteps" :key="idx">
               <span v-if="idx > 0" class="step-arrow">→</span>
               <span class="step-item">

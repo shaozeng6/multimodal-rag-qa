@@ -14,12 +14,15 @@ const props = withDefaults(
     score?: number;
     /** 是否处于流式输出中(显示打字光标) */
     streaming?: boolean;
+    /** 是否展示置信章(仅管理员; 普通用户不暴露内部 QA 分数) */
+    showConfidence?: boolean;
   }>(),
   {
     images: () => [],
     evidence: () => [],
     score: undefined,
     streaming: false,
+    showConfidence: true,
   },
 );
 
@@ -117,9 +120,13 @@ const evidenceImageUrls = computed(() => evidenceImages.value.map((e) => e.url ?
 // 头像文字
 const avatarText = computed(() => (isHuman.value ? '我' : 'AI'));
 
-// ---- 置信章: 仅 AI 消息且已结束流式且带分数时展示 ----
+// ---- 置信章: 仅 AI 消息、已结束流式、带分数、且允许展示(管理员)时展示 ----
 const showStamp = computed(
-  () => props.role === 'ai' && !props.streaming && typeof props.score === 'number',
+  () =>
+    props.role === 'ai' &&
+    !props.streaming &&
+    typeof props.score === 'number' &&
+    props.showConfidence,
 );
 const stampTone = computed(() => {
   const s = props.score ?? 0;
