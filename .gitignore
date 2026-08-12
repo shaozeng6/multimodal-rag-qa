@@ -51,3 +51,8 @@ backend/ingestion/backfill_documents.py
 
 # 工程化工具缓存
 backend/.ruff_cache/
+
+# ==================== 本地截图/演示工具（不属公开功能） ====================
+.shot_cdp/
+.shot_profile/
+frontend/public/__shot__.html
