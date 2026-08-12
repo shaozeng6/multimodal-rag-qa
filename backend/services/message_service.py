@@ -22,7 +22,7 @@ from services.image_store import resolve_image_url
 _TRACE_COLUMNS = {
     "input_text", "modality", "image_caption", "image_relation", "rewritten_query",
     "sub_questions", "kb_context", "kb_images", "retrieval_ok",
-    "evaluate_score", "human_answer", "duration_ms", "evidence",
+    "evaluate_score", "needs_review", "human_answer", "duration_ms", "evidence",
 }
 
 

@@ -27,6 +27,16 @@ const props = withDefaults(
 );
 
 const markdownBodyRef = ref<HTMLElement | null>(null);
+/** 文本来源卡片展开状态(点击查看完整来源, 与图片可点击预览对齐) */
+const expandedTextIdx = ref<number | null>(null);
+
+function toggleText(idx: number): void {
+  expandedTextIdx.value = expandedTextIdx.value === idx ? null : idx;
+}
+
+function isLongText(text?: string): boolean {
+  return (text || '').length > 60;
+}
 
 // 配置 marked: 关闭 mangle, 启用基础换行
 marked.setOptions({ breaks: true, gfm: true });
@@ -39,14 +49,21 @@ const isHuman = computed(() => props.role === 'human');
  */
 const evidenceList = computed<EvidenceItem[]>(() => props.evidence || []);
 
-/** 检索内容N 引用正则: [检索内容N] / (检索内容N) / （检索内容N） */
-const CITE_RE = /[（(]检索内容(\d+)[\]）)]/g;
+/**
+ * 检索引用正则: 兼容模型格式漂移——
+ * - "检索内容N"/"检索文档N"/"检索资料N"/"检索来源N" + 半角/全角括号(可在词前/词后/词与数字间)
+ * - 裸数字引用 "[N]" / "[[N]" / "【N】" / "（N）"(模型偶发不带"检索内容"前缀)
+ * 避免标记显示为原始文本、证据对不上。
+ */
+const CITE_RE =
+  /[【[（(]{0,2}\s*(?:检索(?:内容|文档|资料|来源))?\s*[【[（(]?\s*(\d+)\s*[】\]）)]+/g;
 
 /**
- * 折叠紧邻的重复引用标记: 模型常重复输出引用(如 "部署 [检索内容2][检索内容2]"),
+ * 折叠紧邻的重复引用标记: 模型常重复输出引用(如 "部署 [2][2]"),
  * 这里把连续相同的引用折叠成一个, 避免正文出现 [2][2] 这种冗余。
  */
-const DUP_CITE_RE = /([（(]检索内容(\d+)[\]）)])(?:\s*[（(]检索内容\2[\]）)])+/g;
+const DUP_CITE_RE =
+  /([【[（(]{0,2}\s*(?:检索(?:内容|文档|资料|来源))?\s*[【[（(]?\s*(\d+)\s*[】\]）)]+)(?:\s*[【[（(]{0,2}\s*(?:检索(?:内容|文档|资料|来源))?\s*[【[（(]?\s*\2\s*[】\]）)]+)+/g;
 
 /**
  * 引用编号映射:
@@ -204,10 +221,28 @@ const stampLabel = computed(() => {
                   preview-teleported
                   hide-on-click-modal
                 />
-                <div v-else class="evidence-card">
-                  <div class="evidence-card-file">📄 {{ ev.label || ev.filename || '文档' }}</div>
-                  <div v-if="ev.text" class="evidence-card-snippet">{{ ev.text }}</div>
-                </div>
+                <el-popover
+                  v-else
+                  placement="bottom-start"
+                  :width="360"
+                  trigger="click"
+                  :visible="expandedTextIdx === idx"
+                  @hide="expandedTextIdx = null"
+                >
+                  <div class="evidence-pop">
+                    <div class="evidence-pop-file">{{ ev.label || ev.filename || '文档' }}</div>
+                    <div class="evidence-pop-text">{{ ev.text }}</div>
+                  </div>
+                  <template #reference>
+                    <div class="evidence-card" @click="toggleText(idx)">
+                      <div class="evidence-card-file">
+                        📄 {{ ev.label || ev.filename || '文档' }}
+                      </div>
+                      <div v-if="ev.text" class="evidence-card-snippet">{{ ev.text }}</div>
+                      <span v-if="isLongText(ev.text)" class="evidence-expand">查看全文</span>
+                    </div>
+                  </template>
+                </el-popover>
                 <span v-if="citeSeq(ev.indexes?.[0])" class="evidence-num">{{
                   citeSeq(ev.indexes?.[0])
                 }}</span>
@@ -267,6 +302,7 @@ const stampLabel = computed(() => {
   flex-direction: column;
   gap: 8px;
   max-width: 70%;
+  min-width: 0; // 允许收缩到内容最小宽以下, 证据区换行不撑破气泡
 }
 
 .image-row {
@@ -303,49 +339,69 @@ const stampLabel = computed(() => {
 
   .evidence-row {
     display: flex;
-    gap: 10px;
     flex-wrap: wrap;
+    gap: 8px;
+    align-items: flex-start; // 行内项按内容高度顶部对齐, 不被行高拉伸
+    min-width: 0; // 允许收缩换行, 不撑破气泡
   }
 
   .evidence-item {
     display: flex;
     flex-direction: column;
     gap: 3px;
-    width: 88px;
+    // 图片卡固定宽度
+    width: 80px;
+    flex-shrink: 0;
 
-    // 文本来源卡片: 更宽
+    // 文本来源卡片: 固定统一宽度, 与缩略图组成均匀网格(换行对齐, 截断一致)
     &.is-text {
-      width: 200px;
+      flex: 0 1 220px;
+      width: 220px;
+      min-width: 0;
+
+      // 左上角编号标签占位, 避免覆盖卡片内 "📄 文件名"
+      .evidence-card {
+        padding-left: 24px;
+      }
     }
   }
 
   .evidence-figure {
     position: relative;
-    width: 88px;
-    height: 88px;
+    width: 80px;
+    height: 80px;
+  }
 
-    .is-text & {
-      width: 200px;
-      height: auto;
-    }
+  // 文本来源卡片: figure 不设固定方框, 随卡片内容自适应(原 `.is-text &`
+  // 编译成 `.is-text .evidence-area .evidence-figure`, 祖先关系颠倒永不命中)
+  .evidence-item.is-text .evidence-figure {
+    width: auto;
+    height: auto;
+    min-width: 0;
   }
 
   .evidence-thumb {
-    width: 88px;
-    height: 88px;
+    width: 80px;
+    height: 80px;
     border-radius: var(--radius-sm);
     border: 1px solid rgba(0, 0, 0, 0.08);
     cursor: pointer;
     object-fit: cover;
   }
 
-  // 文本来源卡片
+  // 文本来源卡片(点击展开查看完整来源, 与图片可点击预览对齐)
   .evidence-card {
-    width: 200px;
+    width: 100%; // 填满固定宽文本项
     border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: var(--radius-sm);
     background: rgba(37, 99, 235, 0.05);
     padding: 8px 10px;
+    cursor: pointer;
+    transition: background 0.15s;
+
+    &:hover {
+      background: rgba(37, 99, 235, 0.08);
+    }
 
     .evidence-card-file {
       font-size: 11px;
@@ -365,6 +421,13 @@ const stampLabel = computed(() => {
       -webkit-line-clamp: 3;
       -webkit-box-orient: vertical;
       overflow: hidden;
+    }
+
+    .evidence-expand {
+      display: inline-block;
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--brass);
     }
   }
 
@@ -387,6 +450,7 @@ const stampLabel = computed(() => {
   }
 
   .evidence-name {
+    width: 100%; // 限定在缩略图列宽内, 保证单行省略号生效
     font-size: 10px;
     line-height: 1.3;
     color: var(--muted);
@@ -420,6 +484,7 @@ const stampLabel = computed(() => {
   font-size: 14px;
   line-height: 1.7;
   word-break: break-word;
+  min-width: 0; // 允许内部证据区收缩换行
 }
 
 // 用户: 品牌蓝紧凑块(企业常规形态)
@@ -596,5 +661,30 @@ const stampLabel = computed(() => {
 .empty-content {
   color: var(--muted);
   font-style: italic;
+}
+</style>
+
+<!-- 全文浮层样式: el-popover 内容 teleport 到 body, 需全局样式 -->
+<style lang="scss">
+.evidence-pop {
+  .evidence-pop-file {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-text);
+    margin-bottom: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .evidence-pop-text {
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--ink-text);
+    max-height: 280px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
 }
 </style>

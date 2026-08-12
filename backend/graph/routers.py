@@ -25,7 +25,9 @@ def route_human_node(state: MultiModalRAGState):
     评估后的路由(Phase C):
     - evaluate_score 为 None(评估失败/无回答): 静默放行, 不打扰用户
     - score >= 阈值(默认 0.7, 可配置): 通过, 持久化
-    - score < 阈值: 进入人工审批中断
+    - score < 阈值: 按角色分流——
+      管理员 → 进入人工审批中断(中断等 admin 通过/驳回)
+      普通用户 → 不打断, 直接持久化交付(由 persist_context 标记 needs_review 待管理端审核)
     """
     score = state.get("evaluate_score")
     if score is None:
@@ -37,8 +39,14 @@ def route_human_node(state: MultiModalRAGState):
     if score >= threshold:
         logger.info("[路由] evaluate_node → persist_context (score={:.3f} >= {:.2f})", score, threshold)
         return "persist_context"
-    logger.info("[路由] evaluate_node → human_approval (score={:.3f} < {:.2f})", score, threshold)
-    return "human_approval"
+
+    if state.get("role") == "admin":
+        logger.info("[路由] evaluate_node → human_approval (score={:.3f} < {:.2f}, 管理员)", score, threshold)
+        return "human_approval"
+    # 普通用户低分: 不打断, 直接交付, persist 标记待审
+    logger.info("[路由] evaluate_node → persist_context (score={:.3f} < {:.2f}, 普通用户, 标记待审)",
+                score, threshold)
+    return "persist_context"
 
 
 def route_human_approval_node(state: MultiModalRAGState):

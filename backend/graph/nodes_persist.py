@@ -29,6 +29,13 @@ def _build_trace(state: MultiModalRAGState, duration_ms: Optional[int]) -> dict:
     只随 ai 消息落库供审计/调优, 永不回流为模型上下文(读写分离)。
     """
     kb_context = state.get("kb_context") or []
+    # 普通用户低分回答(已交付未走人工审批)标记待管理端审核; 管理员低分走审批, 不在此标记
+    score = state.get("evaluate_score")
+    needs_review = (
+        score is not None
+        and score < get_float("evaluate.threshold", settings.EVALUATE_THRESHOLD)
+        and state.get("role") != "admin"
+    )
     return {
         "input_text": (state.get("input_text") or "")[:200],
         # 优先读 state 里的 modality(process_input 已写); 兼容旧 checkpoint 缺失时现算
@@ -45,7 +52,8 @@ def _build_trace(state: MultiModalRAGState, duration_ms: Optional[int]) -> dict:
         ],
         "kb_images": (state.get("kb_images") or [])[:5],
         "retrieval_ok": bool(state.get("retrieval_ok")),
-        "evaluate_score": state.get("evaluate_score"),
+        "evaluate_score": score,
+        "needs_review": needs_review,
         "human_answer": state.get("human_answer") or "",
         "duration_ms": duration_ms,
         # 引用证据(原始 image_path, 供历史回放时 resolve 成 URL)

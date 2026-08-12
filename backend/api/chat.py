@@ -170,6 +170,7 @@ async def chat(
     input_data = {
         "user": current_user.username,
         "user_id": current_user.id,
+        "role": current_user.role,
         "session_id": session_id,
         "input_text": req.text or "",
         "input_image": req.image or "",

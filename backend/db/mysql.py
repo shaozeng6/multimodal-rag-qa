@@ -87,6 +87,12 @@ async def _ensure_trace_columns(conn) -> None:
         "ADD COLUMN evidence JSON NULL "
         "COMMENT 'AI回答的引用证据(图片/文本来源), 供历史回放还原证据区' AFTER duration_ms",
     )
+    await _ensure_column(
+        conn, "message_traces", "needs_review",
+        "ALTER TABLE message_traces "
+        "ADD COLUMN needs_review TINYINT(1) DEFAULT 0 "
+        "COMMENT '普通用户低分回答待管理端审核' AFTER evaluate_score",
+    )
 
 
 async def _ensure_knowledge_columns(conn) -> None:

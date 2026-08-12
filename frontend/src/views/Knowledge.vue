@@ -6,6 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import type { UploadFile, UploadInstance } from 'element-plus';
 import Settings from '@/views/Settings.vue';
 import UserManagement from '@/views/UserManagement.vue';
+import ReviewQueue from '@/views/ReviewQueue.vue';
 import {
   uploadPdf,
   getDocuments,
@@ -31,10 +32,10 @@ function back(): void {
   router.push('/chat');
 }
 
-// ============ 工作台 Tab(知识库 / 系统设置 / 用户管理), URL query 驱动 ============
+// ============ 工作台 Tab(知识库 / 系统设置 / 用户管理 / 审核队列), URL query 驱动 ============
 const activeTab = computed(() => {
   const t = route.query.tab;
-  return t === 'settings' || t === 'users' ? t : 'kb';
+  return t === 'settings' || t === 'users' || t === 'reviews' ? t : 'kb';
 });
 
 function handleTabChange(tab: string): void {
@@ -651,6 +652,12 @@ onUnmounted(() => {
       <el-tab-pane label="用户管理" name="users">
         <div class="settings-pane">
           <UserManagement />
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="审核队列" name="reviews">
+        <div class="settings-pane">
+          <ReviewQueue />
         </div>
       </el-tab-pane>
     </el-tabs>

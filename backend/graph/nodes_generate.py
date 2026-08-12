@@ -13,6 +13,7 @@ from graph.context import get_working_window
 from graph.llm_init import multiModal_llm
 from graph.nodes_shared import (
     _CATEGORY_LABELS,
+    _auto_attribution_evidence,
     _extract_evidence,
     _image_to_model_url,
 )
@@ -41,8 +42,9 @@ def _build_system_prompt(summary: str, kb_context: list, image_relation: str) ->
         "响应必须使用 Markdown 格式",
         "优先基于[知识库检索结果](含[文档]/[记忆]/[图片]来源标签)回答, 其次参考[历史对话摘要]与最近的对话消息",
         "若上下文中没有相关信息, 请直接说明并不要编造; 仅当知识库检索结果与检索到的图片均为空时, 才说明'知识库中暂无相关资料'并基于自身知识回答",
-        "引用知识库内容时, 在内容末尾标注其资料来源文件名",
-        "引用[图片]文档时, 在对应文字后标注其引用编号(如 [检索内容3]), 便于前端定位对应图片; 不要把图中的视觉细节当作凭空知道的内容写出来",
+        "引用知识库来源时, 在对应内容后标注来源编号, 格式严格为 [检索内容N](半角方括号, N 为来源编号, 文档/图片/记忆统一用此格式, 不要用'检索文档N'等其它写法或文件名代替)",
+        "只对你真正依据的知识库内容标注编号; 推测、自身知识或知识库没有直接依据的内容不要标注编号",
+        "图片内容的描述同样用 [检索内容N] 标注编号; 不要把图中的视觉细节当作凭空知道的内容写出来",
         "若上下文包含 HTML 表格(<table> 标签), 请转换为 Markdown 表格输出, 不要输出 HTML 标签",
     ]
     if image_relation == "contradictory":
@@ -107,6 +109,11 @@ async def generator_node(state: MultiModalRAGState, config: RunnableConfig):
     answer = response.content if isinstance(response.content, str) else str(response.content)
     # 方案B: 扫描回答里的 (检索内容N) 引用, 收集被引用的 doc 作为前端证据(图片+文本来源; 严格模式: 无命中为空)
     evidence = _extract_evidence(answer, kb_context)
+    # 兜底: 模型没引用任何来源时, 按词法相似度自动匹配最相关来源作为证据卡(零 API 成本)
+    if not evidence and kb_context:
+        evidence = _auto_attribution_evidence(answer, kb_context)
+        if evidence:
+            logger.info("[节点] 无显式引用, 词法归因兜底命中 {} 个来源", len(evidence))
     logger.info("[节点] generator_node 完成, 回答 {} 字符, 证据 {} 项", len(answer), len(evidence))
     return {"answer": answer, "evidence": evidence}
 
@@ -154,5 +161,7 @@ async def regenerate_node(state: MultiModalRAGState, config: RunnableConfig):
     answer = response.content if isinstance(response.content, str) else str(response.content)
     # 重生成后证据重算, 避免沿用旧草稿的引用
     evidence = _extract_evidence(answer, kb_context)
+    if not evidence and kb_context:
+        evidence = _auto_attribution_evidence(answer, kb_context)
     logger.info("[节点] regenerate_node 完成, 回答 {} 字符, 证据 {} 项", len(answer), len(evidence))
     return {"answer": answer, "evidence": evidence}

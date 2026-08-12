@@ -66,6 +66,7 @@ class MessageTrace(Base):
     kb_images = Column(JSON)      # list[str] 图片引用
     retrieval_ok = Column(Boolean)
     evaluate_score = Column(Float)
+    needs_review = Column(Boolean, default=False)  # 普通用户低分回答已交付, 待管理端审核
     human_answer = Column(String(10))
     duration_ms = Column(Integer)
     # 引用证据(方案B): 回答引用的来源(图片/文本), 供历史回放还原证据区; 只写不回流

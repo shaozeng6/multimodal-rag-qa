@@ -29,6 +29,7 @@ class MultiModalRAGState(TypedDict, total=False):
     modality: str               # 输入模态: text / image / text_image
     user: str                   # 用户名(展示/日志用)
     user_id: Optional[int]      # 用户数字 id(记忆隔离按 id, 改名不影响归属)
+    role: str                   # user/admin: 低分审批按角色分流(管理员打断, 普通用户直接交付)
     session_id: str
     start_ts: float             # 本轮开始时间(monotonic), 供 trace 计算耗时
 
@@ -57,5 +58,6 @@ class MultiModalRAGState(TypedDict, total=False):
     answer: str                 # 最终回答(评估/持久化直接读它, 不再解析 messages)
     evidence: list              # 方案B: 回答中被引用的 doc 证据(图片+文本来源), 供前端证据区
     evaluate_score: Optional[float]  # LLM Judge 评分 0~1, None=评估失败(区别于低分)
+    needs_review: bool          # 普通用户低分回答已交付但需管理端审核(路由/持久化判定)
     human_answer: str           # approve / reject
     human_reason: str           # 人工审批备注/驳回原因
