@@ -46,15 +46,18 @@ class OptimizedMilvusAsyncWriter:
         except Exception as e:
             logger.exception("插入数据到 Milvus 失败: {}", e)
 
-    async def async_insert(self, context_text: str, user: str, message_type: str = "AIMessage"):
-        """异步插入数据。"""
+    async def async_insert(self, context_text: str, user: object, message_type: str = "AIMessage"):
+        """异步插入数据。
+
+        user 传数字 user_id(记忆按 id 隔离, 改名不影响归属); VARCHAR 字段存其字符串形式。
+        """
         # 向量生成放线程池, 避免阻塞事件循环
         dense_vector = await asyncio.get_running_loop().run_in_executor(
             thread_pool, self._get_dense_vector, context_text
         )
         data = {
             "context_text": context_text,
-            "user": user,
+            "user": str(user) if user is not None else None,
             "timestamp": int(time.time() * 1000),  # 毫秒时间戳
             "message_type": message_type,
             "context_dense": dense_vector,

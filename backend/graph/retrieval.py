@@ -97,11 +97,13 @@ async def _search_doc_image(emb: List[float], limit: int) -> list:
         return []
 
 
-async def _search_context(query: str, limit: int) -> list:
-    """t_context 记忆路: hybrid_search 历史上下文。
+async def _search_context(query: str, limit: int, user_id: Optional[int] = None) -> list:
+    """t_context 记忆路: hybrid_search 历史上下文(按 user_id 隔离)。
 
     关键: context_dense 由 persist_context 用 embedding.embed_query(OpenAIEmbeddings) 写入,
     检索必须用同一 embedding 模型生成查询向量, 否则向量空间不一致, 语义检索失效。
+    user_id: 当前用户数字 id; 记忆库跨会话共享但**必须按用户隔离**(修 KNOWN_ISSUES #3 隐私泄漏)。
+    写入侧把 user_id 存为字符串, 这里过滤 `user == "user_id"`(改名不影响归属)。
     """
     def _sync():
         try:
@@ -109,13 +111,17 @@ async def _search_context(query: str, limit: int) -> list:
         except Exception as e:
             logger.warning("记忆检索向量生成失败: {}", e)
             return []
+        filter_expr = None
+        if user_id is not None:
+            filter_expr = 'user == "{}"'.format(user_id)
         dense_req = AnnSearchRequest(
             [dense_vec], "context_dense",
-            {"metric_type": "IP", "params": {"nprobe": 10}}, limit=limit,
+            {"metric_type": "IP", "params": {"nprobe": 10}}, limit=limit, expr=filter_expr,
         )
         sparse_req = AnnSearchRequest(
             [query], "context_sparse",
             {"metric_type": "BM25", "params": {"drop_ratio_search": 0.2}}, limit=limit,
+            expr=filter_expr,
         )
         res = milvus_client.hybrid_search(
             collection_name=CONTEXT_COLLECTION_NAME,
@@ -254,11 +260,11 @@ async def _embed_for_plan(query: str, input_image: str, skip_image_path: bool):
     return text_emb, image_emb
 
 
-async def _search_channels(query: str, text_emb, image_emb):
+async def _search_channels(query: str, text_emb, image_emb, user_id: Optional[int] = None):
     """三路并行检索 + 各自去重, 返回 (channels, weights) 供 RRF 融合。
 
     - 文本路 / 图片路: 知识库 t_doc
-    - 记忆路: t_context(跨会话回忆)。只要有问题就搜, 不依赖本会话历史——
+    - 记忆路: t_context(跨会话回忆, 按 user 隔离)。只要有问题就搜, 不依赖本会话历史——
       否则新会话第一问永远回忆不到以前答过的内容。
       命中统一为 _memo_to_doc 结构并降权 MEMORY_WEIGHT。
     """
@@ -274,7 +280,8 @@ async def _search_channels(query: str, text_emb, image_emb):
     if image_emb:
         tasks.append(("image", _search_doc_image(image_emb, image_topk)))
     if query:
-        tasks.append(("memory", _search_context(query, memory_topk)))
+        # 记忆路按当前用户 id 隔离(修 KNOWN_ISSUES #3)
+        tasks.append(("memory", _search_context(query, memory_topk, user_id=user_id)))
     if not tasks:
         return [], []
 
@@ -325,7 +332,9 @@ async def unified_retrieve(state) -> dict:
     text_emb, image_emb = await _embed_for_plan(plan["query"], plan["input_image"], plan["skip_image_path"])
 
     # 2. 三路并行检索 + 去重(单路失败降级为空)
-    channels, weights = await _search_channels(plan["query"], text_emb, image_emb)
+    channels, weights = await _search_channels(
+        plan["query"], text_emb, image_emb, user_id=state.get("user_id"),
+    )
 
     # 3. RRF 名次融合(相对名次, 跨通道量纲不可比) + topK(运行时读取)
     fused = _rrf_fuse(channels, k=_rrf_k(), weights=weights) if channels else []

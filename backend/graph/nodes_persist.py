@@ -79,7 +79,8 @@ async def persist_context_node(state: MultiModalRAGState, config: RunnableConfig
     """
     answer = state.get("answer") or ""
     session_id = state.get("session_id") or ""
-    user = state.get("user") or "unknown"
+    # 记忆写入用数字 user_id 隔离(改名不影响归属), 缺省时退回 username
+    memo_owner = state.get("user_id") or state.get("user") or "unknown"
     if not answer:
         logger.warning("持久化跳过: 无回答")
         return {}
@@ -120,7 +121,7 @@ async def persist_context_node(state: MultiModalRAGState, config: RunnableConfig
     if should_memoize:
         try:
             writer = get_milvus_writer()
-            await writer.async_insert(answer, user, "AIMessage")
+            await writer.async_insert(answer, memo_owner, "AIMessage")
         except Exception as e:
             logger.exception("写入 Milvus 上下文失败: {}", e)
     else:

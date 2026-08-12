@@ -5,6 +5,7 @@ import { ArrowLeft, FolderOpened, Upload, Search } from '@element-plus/icons-vue
 import { ElMessage, ElMessageBox } from 'element-plus';
 import type { UploadFile, UploadInstance } from 'element-plus';
 import Settings from '@/views/Settings.vue';
+import UserManagement from '@/views/UserManagement.vue';
 import {
   uploadPdf,
   getDocuments,
@@ -30,13 +31,16 @@ function back(): void {
   router.push('/chat');
 }
 
-// ============ 工作台 Tab(知识库 / 系统设置), URL query 驱动 ============
-const activeTab = computed(() => (route.query.tab === 'settings' ? 'settings' : 'kb'));
+// ============ 工作台 Tab(知识库 / 系统设置 / 用户管理), URL query 驱动 ============
+const activeTab = computed(() => {
+  const t = route.query.tab;
+  return t === 'settings' || t === 'users' ? t : 'kb';
+});
 
 function handleTabChange(tab: string): void {
   router.replace({
     path: '/knowledge',
-    query: tab === 'settings' ? { tab: 'settings' } : {},
+    query: tab === 'kb' ? {} : { tab },
   });
 }
 
@@ -641,6 +645,12 @@ onUnmounted(() => {
       <el-tab-pane label="系统设置" name="settings">
         <div class="settings-pane">
           <Settings />
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="用户管理" name="users">
+        <div class="settings-pane">
+          <UserManagement />
         </div>
       </el-tab-pane>
     </el-tabs>

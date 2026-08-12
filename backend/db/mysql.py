@@ -152,6 +152,11 @@ async def _ensure_user_columns(conn) -> None:
     if added:
         await conn.execute(text("UPDATE users SET must_change_password = 1 WHERE username = 'admin'"))
         logger.info("迁移: 存量 admin 已标记强制改密")
+    await _ensure_column(
+        conn, "users", "is_active",
+        "ALTER TABLE users ADD COLUMN is_active TINYINT(1) DEFAULT 1 "
+        "COMMENT '是否可用(禁用后无法登录)' AFTER must_change_password",
+    )
 
 
 async def _ensure_ingest_status_enum(conn) -> None:

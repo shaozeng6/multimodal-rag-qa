@@ -17,4 +17,6 @@ class User(Base):
     role = Column(Enum("user", "admin"), default="user")
     # P0: 首登强制改密(种子 admin 与存量 admin 迁移后为 True, 改密成功后清除)
     must_change_password = Column(Boolean, default=False)
+    # 用户/角色体系: 是否可用(禁用后无法登录, 保留会话/消息历史)
+    is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.now)

@@ -27,7 +27,8 @@ class MultiModalRAGState(TypedDict, total=False):
     input_text: Optional[str]
     input_image: Optional[str]  # base64 data URI 或图片 URL
     modality: str               # 输入模态: text / image / text_image
-    user: str
+    user: str                   # 用户名(展示/日志用)
+    user_id: Optional[int]      # 用户数字 id(记忆隔离按 id, 改名不影响归属)
     session_id: str
     start_ts: float             # 本轮开始时间(monotonic), 供 trace 计算耗时
 

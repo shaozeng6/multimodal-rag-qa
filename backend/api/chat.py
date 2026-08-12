@@ -169,6 +169,7 @@ async def chat(
     # 输入模态由 input_text/input_image 决定, 无需单独传 input_type(process_input 本地派生)
     input_data = {
         "user": current_user.username,
+        "user_id": current_user.id,
         "session_id": session_id,
         "input_text": req.text or "",
         "input_image": req.image or "",
