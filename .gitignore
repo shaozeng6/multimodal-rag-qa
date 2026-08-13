@@ -44,6 +44,7 @@ KNOWN_ISSUES.md
 PROJECT_AUDIT_*.md
 PROJECT_REVIEW_*.md
 PROJECT_FLOW.md
+多模态输入检索与持久化设计.md
 理解 Pydantic model_config.md
 
 # 旧项目迁移的一次性工具(不属公开功能)
