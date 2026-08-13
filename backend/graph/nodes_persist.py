@@ -129,7 +129,9 @@ async def persist_context_node(state: MultiModalRAGState, config: RunnableConfig
     if should_memoize:
         try:
             writer = get_milvus_writer()
-            await writer.async_insert(answer, memo_owner, "AIMessage")
+            # 记忆存「问题 + 回答」对: 问题用用户原话(纯图轮退用 caption), 供检索以问题匹配
+            question = state.get("input_text") or state.get("image_caption") or ""
+            await writer.async_insert(answer, memo_owner, "AIMessage", question=question)
         except Exception as e:
             logger.exception("写入 Milvus 上下文失败: {}", e)
     else:

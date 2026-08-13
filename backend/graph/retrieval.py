@@ -98,10 +98,15 @@ async def _search_doc_image(emb: List[float], limit: int) -> list:
 
 
 async def _search_context(query: str, limit: int, user_id: Optional[int] = None) -> list:
-    """t_context 记忆路: hybrid_search 历史上下文(按 user_id 隔离)。
+    """t_context 记忆路: 按「问题 + 回答」双字段 hybrid_search(按 user_id 隔离)。
 
-    关键: context_dense 由 persist_context 用 embedding.embed_query(OpenAIEmbeddings) 写入,
-    检索必须用同一 embedding 模型生成查询向量, 否则向量空间不一致, 语义检索失效。
+    记忆条目存「问题 + 回答」对, 各自建稠密 + BM25 索引:
+    - 问题路(question_dense / question_sparse): 主检 —— query 与问题同为"问题形态", 语义最对齐
+    - 回答路(context_dense / context_sparse): 兜 recall —— 语义相关但字面与问题不重叠时命中
+    四条路经 WeightedRanker 融合, 问题路权重更高; 命中后输出 question + context_text(答案)。
+
+    关键: question_dense/context_dense 均由 persist_context 用 embedding.embed_query(OpenAIEmbeddings)
+    写入, 检索必须用同一 embedding 模型生成查询向量, 否则向量空间不一致, 语义检索失效。
     user_id: 当前用户数字 id; 记忆库跨会话共享但**必须按用户隔离**(修 KNOWN_ISSUES #3 隐私泄漏)。
     写入侧把 user_id 存为字符串, 这里过滤 `user == "user_id"`(改名不影响归属)。
     """
@@ -114,21 +119,21 @@ async def _search_context(query: str, limit: int, user_id: Optional[int] = None)
         filter_expr = None
         if user_id is not None:
             filter_expr = 'user == "{}"'.format(user_id)
-        dense_req = AnnSearchRequest(
-            [dense_vec], "context_dense",
-            {"metric_type": "IP", "params": {"nprobe": 10}}, limit=limit, expr=filter_expr,
-        )
-        sparse_req = AnnSearchRequest(
-            [query], "context_sparse",
-            {"metric_type": "BM25", "params": {"drop_ratio_search": 0.2}}, limit=limit,
-            expr=filter_expr,
-        )
+        dense_params = {"metric_type": "IP", "params": {"nprobe": 10}}
+        bm25_params = {"metric_type": "BM25", "params": {"drop_ratio_search": 0.2}}
+        reqs = [
+            AnnSearchRequest([dense_vec], "question_dense", dense_params, limit=limit, expr=filter_expr),
+            AnnSearchRequest([query], "question_sparse", bm25_params, limit=limit, expr=filter_expr),
+            AnnSearchRequest([dense_vec], "context_dense", dense_params, limit=limit, expr=filter_expr),
+            AnnSearchRequest([query], "context_sparse", bm25_params, limit=limit, expr=filter_expr),
+        ]
         res = milvus_client.hybrid_search(
             collection_name=CONTEXT_COLLECTION_NAME,
-            reqs=[dense_req, sparse_req],
-            ranker=WeightedRanker(1.0, 1.0),
+            reqs=reqs,
+            # 权重须在 [0,1] 且与 reqs 顺序一致; 问题路主检, 回答路兜底
+            ranker=WeightedRanker(0.7, 0.7, 0.4, 0.4),
             limit=limit,
-            output_fields=["context_text"],
+            output_fields=["question", "context_text"],
         )
         return res[0] if res else []
 
@@ -353,7 +358,12 @@ async def unified_retrieve(state) -> dict:
 
 
 def _memo_to_doc(hit: dict) -> dict:
-    """把 t_context 命中(hit 结构)统一为与文档路一致的结构。"""
+    """把 t_context 命中(hit 结构)统一为与文档路一致的结构。
+
+    text 带上前置问题(问/答形式), 让生成器知道这条记忆的来由; 无问题时只给答案。
+    """
     ent = _hit_entity(hit)
-    return {"text": hit.get("context_text") or ent.get("context_text") or "",
-            "category": "memory", "image_path": None, "filename": None}
+    answer = hit.get("context_text") or ent.get("context_text") or ""
+    question = hit.get("question") or ent.get("question") or ""
+    text = f"问: {question}\n答: {answer}" if question else answer
+    return {"text": text, "category": "memory", "image_path": None, "filename": None}

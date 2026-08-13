@@ -67,9 +67,18 @@ def _t_doc_schema():
 
 
 def _t_context_schema():
-    """跨会话记忆集合 schema: context_sparse 由 context_text 经 BM25 Function 生成。"""
+    """跨会话记忆集合 schema: 存「问题 + 回答」对, 各自建稠密/BM25 索引。
+
+    - context_*: 回答侧(答案文本 + 稠密 + BM25, 由 context_text 自动生成)
+    - question_*: 问题侧(问题文本 + 稠密 + BM25, 由 question 自动生成)
+    检索时问题路为主检(query↔question 同语义域), 回答路兜 recall。
+    """
     schema = milvus_client.create_schema()
     schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True, auto_id=True)
+    schema.add_field(
+        field_name="question", datatype=DataType.VARCHAR, max_length=6000,
+        enable_analyzer=True, analyzer_params=_ANALYZER_PARAMS,
+    )
     schema.add_field(
         field_name="context_text", datatype=DataType.VARCHAR, max_length=6000,
         enable_analyzer=True, analyzer_params=_ANALYZER_PARAMS,
@@ -77,8 +86,16 @@ def _t_context_schema():
     schema.add_field(field_name="user", datatype=DataType.VARCHAR, max_length=1000, nullable=True)
     schema.add_field(field_name="timestamp", datatype=DataType.INT64, nullable=True)
     schema.add_field(field_name="message_type", datatype=DataType.VARCHAR, max_length=100, nullable=True)
+    schema.add_field(field_name="question_sparse", datatype=DataType.SPARSE_FLOAT_VECTOR)
+    schema.add_field(field_name="question_dense", datatype=DataType.FLOAT_VECTOR, dim=EMBEDDING_DIMENSIONS)
     schema.add_field(field_name="context_sparse", datatype=DataType.SPARSE_FLOAT_VECTOR)
     schema.add_field(field_name="context_dense", datatype=DataType.FLOAT_VECTOR, dim=EMBEDDING_DIMENSIONS)
+    schema.add_function(Function(
+        name="question_bm25_emb",
+        input_field_names=["question"],
+        output_field_names=["question_sparse"],
+        function_type=FunctionType.BM25,
+    ))
     schema.add_function(Function(
         name="text_bm25_emb",
         input_field_names=["context_text"],
@@ -86,6 +103,14 @@ def _t_context_schema():
         function_type=FunctionType.BM25,
     ))
     index_params = milvus_client.prepare_index_params()
+    index_params.add_index(
+        field_name="question_sparse", index_name="question_sparse_inverted_index",
+        index_type="SPARSE_INVERTED_INDEX", metric_type="BM25", params=_BM25_INDEX_PARAMS,
+    )
+    index_params.add_index(
+        field_name="question_dense", index_name="question_dense_inverted_index",
+        index_type="AUTOINDEX", metric_type="IP",
+    )
     index_params.add_index(
         field_name="context_sparse", index_name="context_sparse_inverted_index",
         index_type="SPARSE_INVERTED_INDEX", metric_type="BM25", params=_BM25_INDEX_PARAMS,
