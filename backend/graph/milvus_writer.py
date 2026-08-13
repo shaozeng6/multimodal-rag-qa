@@ -21,7 +21,8 @@ from graph.llm_init import (
 thread_pool = ThreadPoolExecutor(max_workers=5)
 
 # 回答里的来源引用标记(如 [检索内容1]): 作为记忆回喂时会与当前检索编号错位, 写入前剥离
-_CITE_RE = re.compile(r"\[检索内容\d+\]")
+# \s* 连标记前紧贴的空白一起吃掉, 避免残留多余空格(不折叠正文内合法的换行)
+_CITE_RE = re.compile(r"\s*\[检索内容\d+\]")
 
 
 def _clean_memory_text(text: str) -> str:
