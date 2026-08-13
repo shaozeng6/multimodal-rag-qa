@@ -35,7 +35,7 @@
 ## 核心特性
 
 - **多模态输入与检索**:`image_analysis` 节点为图片生成 caption 以桥接文本语义;文本路 / 图片路 / 记忆路三路并行召回,经 RRF 名次融合去重;图文关系一致性评估,避免无关图片干扰检索。
-- **LangGraph 图工作流**:输入 → 图片分析 → 查询改写 → 统一检索 → 生成 → LLM 评审 →(人工审批)→ 持久化;Redis checkpointer 支持**断点续跑**与多轮上下文管理。
+- **LangGraph 图工作流**:输入 → 图片分析 → 查询改写 → 统一检索 → 生成 → LLM 评审 → (人工审批) → 持久化;Redis checkpointer 支持**断点续跑**与多轮上下文管理。
 - **LLM-as-Judge 评估与人工审批**:由独立评审模型打分(消除自评偏置),低于 `EVALUATE_THRESHOLD` 的回答进入人工审批,可审批通过或驳回重生成。
 - **上下文管理**:多轮滑动窗口 + 超长对话自动摘要压缩;跨会话记忆检索(`t_context`),仅高质量回答进入记忆。
 - **入库管道**:基于 vllm `dots_ocr` 的文档版面解析与文字识别(OCR),经智能分块与多模态向量化后写入 Milvus,MySQL 记录文档元数据;异步任务 + 进度查询。
@@ -48,7 +48,7 @@
 
 ### 多模态问答
 
-上传产品结构示意图并提问,系统通过图像分析识别图中部件,结合知识库检索生成回答,并同时呈现引用证据、置信度评分与执行链路。
+上传产品结构示意图并提问,系统通过图像分析识别图中部件,结合知识库检索生成回答,并呈现引用证据、置信度评分与执行链路。
 
 ![多模态问答](docs/screenshots/chat-multimodal.png)
 
@@ -60,28 +60,26 @@
 
 ## 系统架构
 
-```
-用户输入(文本 / 图片)
-   ▼
-process_input ──有图──▶ image_analysis     图→caption + 图文一致性
-   │ 无图                          │
-   ▼                              ▼
-query_rewriter     指代消解 / 改写(按模态选源)
-   ▼
-unified_retrieve   文本路 + 图片路 + 记忆路(RRF 名次融合)
-   ▼
-generator_node     LLM 生成(输入图 + 检索图 + 历史图进模型)
-   ▼
-evaluate_node      LLM-as-Judge 评分
-   ├─ ≥ 阈值 ─▶ persist_context ─▶ SSE done 事件
-   └─ < 阈值 ─▶ human_approval(人工审批中断)
-                  ├─ 通过 ─▶ persist_context
-                  └─ 驳回 ─▶ regenerate_node ─▶ persist_context
+```mermaid
+flowchart TD
+    Input["用户输入<br/>(文本 / 图片)"] --> Process["process_input"]
+    Process -->|无图| Rewrite["query_rewriter<br/>指代消解 / 改写(按模态选源)"]
+    Process -->|有图| ImageAnalysis["image_analysis<br/>图 → caption + 图文一致性"]
+    ImageAnalysis --> Rewrite
+    Rewrite --> Retrieve["unified_retrieve<br/>文本路 + 图片路 + 记忆路<br/>RRF 名次融合"]
+    Retrieve --> Generate["generator_node<br/>LLM 生成"]
+    Generate --> Evaluate["evaluate_node<br/>LLM-as-Judge 评分"]
+    Evaluate -->|"通过(≥ 阈值)"| Persist["persist_context"]
+    Persist --> Done["SSE done 事件"]
+    Evaluate -->|"未通过(< 阈值)"| Approval["human_approval<br/>人工审批中断"]
+    Approval -->|通过| Persist
+    Approval -->|驳回| Regenerate["regenerate_node"]
+    Regenerate --> Persist
 ```
 
-- **持久化**:`persist_context` 将回答、图片引用、引用证据、中间 trace 写入 MySQL,高质量回答写入 Milvus 记忆。
-- **流式**:后端通过 SSE 下发 `token` / `node_update` / `interrupt` / `done` / `error` 等事件,前端实现打字机效果与审批弹窗。
-- **中断恢复**:审批中断点由 Redis checkpointer 保存执行状态,`/approve` 恢复后从中断处继续。
+- **持久化**:`persist_context` 将回答、图片引用、引用证据与中间 trace 写入 MySQL,高质量回答写入 Milvus 记忆库。
+- **流式输出**:后端通过 SSE 下发 `token` / `node_update` / `interrupt` / `done` / `error` 等事件,前端实现流式逐字渲染与审批弹窗。
+- **中断恢复**:审批中断状态由 Redis checkpointer 保存,`/approve` 恢复后从断点继续执行。
 
 ## 多模态检索设计
 
@@ -248,7 +246,7 @@ npm run dev               # http://localhost:5173
 
 「审核队列」页(管理工作台第四个标签页)作为人工审批流程的补充:
 
-- **按角色分流**:管理员会话中的低分回答仍走**即时审批中断**(原流程);普通用户会话中的低分回答不中断、直接交付,自动标记待审进入本队列。
+- **按角色分流**:管理员会话中的低分回答仍走**即时审批中断**(原流程);普通用户会话中的低分回答不中断、直接返回用户,自动标记待审进入本队列。
 - **处理方式**:查看待审回答(问题 / 回答 / 评分)后可选择**通过**或**忽略**(忽略会清除标记并记录处理动作)。
 - **记忆质量线**:普通用户的回答仍受记忆质量线约束,低分回答不写入跨会话记忆。
 
@@ -288,7 +286,7 @@ npm run dev               # http://localhost:5173
 
 | 事件 | 说明 |
 |---|---|
-| `token` | LLM 流式 token(打字机效果) |
+| `token` | LLM 流式 token(前端逐字渲染) |
 | `node_update` | 节点执行进度(前端展示执行链路) |
 | `title_update` | 首轮自动生成会话标题 |
 | `interrupt` | 命中人工审批(携带草稿答案与评分) |
@@ -297,7 +295,7 @@ npm run dev               # http://localhost:5173
 
 ## 工程化工具
 
-静态检查与格式化命令(本项目不维护业务测试,提交 / 改动前建议执行):
+静态检查与格式化命令(本项目未维护自动化业务测试,提交代码前建议执行):
 
 ```bash
 # 后端: Python lint(ruff, 查未用导入/未定义/常见 bug) + 格式化
