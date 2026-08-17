@@ -207,6 +207,21 @@ def count_documents_by_filename(filename: str) -> int:
         ).scalar_one() or 0
 
 
+def count_documents_by_md5(file_md5: str) -> int:
+    """按源文件 md5 统计已入库文档数(上传去重, 修 D2)。
+
+    只统计已入库文档(knowledge_documents), 失败/进行中任务不计;
+    配合上传接口在入库前查重, 避免同文件重复上传产生重复文档行+重复向量。
+    """
+    if not file_md5:
+        return 0
+    with SyncSession() as db:
+        return db.execute(
+            select(func.count()).select_from(KnowledgeDocument)
+            .where(KnowledgeDocument.file_md5 == file_md5)
+        ).scalar_one() or 0
+
+
 def cleanup_job_files(job_id: str) -> None:
     """清理该入库任务的磁盘产物: OCR md 目录 + 临时 PDF。
 

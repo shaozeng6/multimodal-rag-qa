@@ -80,7 +80,12 @@ def doc_to_dict(docs: List[Document]) -> List[Dict]:
 
 
 def generate_image_description(data_list, multiModal_llm, image_to_base64):
-    """为图片字典生成多模态描述(结合前后文), 写回 text 字段。"""
+    """为图片字典生成多模态描述(结合前后文), 写回 text 字段。
+
+    D5 修复: 单张图描述失败(文件缺失/LLM 异常/返回块式 content)不再中断整个管道;
+    该项保留 —— 图片仍以纯视觉向量入库(process_item 用 image_path 向量化,
+    不依赖 text), 仅"文搜图"的 BM25 描述腿缺失, 记日志便于排查。
+    """
     results = []
     for index, item in enumerate(data_list):
         if not item.get('image_path'):  # 非图片字典
@@ -119,16 +124,26 @@ def generate_image_description(data_list, multiModal_llm, image_to_base64):
             {"type": "text", "text": context_prompt},
             {"type": "image_url", "image_url": {"url": image_data}},
         ])
-        response = multiModal_llm.invoke([message])
-        item['text'] = response.content
-        logger.info("[入库] 图片描述生成: {} ({} 字符)", item['image_path'], len(response.content))
+        try:
+            response = multiModal_llm.invoke([message])
+            content = response.content if isinstance(response.content, str) else str(response.content)
+            item['text'] = content
+            logger.info("[入库] 图片描述生成: {} ({} 字符)", item['image_path'], len(content))
+        except Exception as e:
+            # D5 修复: 单项失败跳过描述, 不中断整个管道
+            logger.warning("[入库] 图片描述生成失败, 该项保留(纯视觉向量照常入库): {} - {}",
+                           item['image_path'], e)
+            item['text'] = ""
         results.append(item)
 
     return results
 
 
 def generate_table_description(data_list, llm):
-    """为表格字典生成自然语言描述, text = 描述 + 原始 HTML。"""
+    """为表格字典生成自然语言描述, text = 描述 + 原始 HTML。
+
+    D5 修复: 单表描述失败不中断管道, 保留原始 HTML 作 text(BM25 仍可命中表格内容)。
+    """
     table_count = sum(1 for item in data_list if item.get('category') == 'table')
     if table_count:
         logger.info("[入库] 表格描述生成: {} 个表格待描述", table_count)
@@ -166,9 +181,15 @@ def generate_table_description(data_list, llm):
             context_prompt = "请描述以下表格的内容, 生成简洁描述, 描述内容长度最好不超过300个汉字。"
 
         message = HumanMessage(content=context_prompt + f"\n\n表格HTML:\n{table_html}")
-        response = llm.invoke([message])
-        # text = 描述 + 原始 HTML(描述用于检索匹配, HTML 用于展示)
-        item['text'] = response.content + "\n\n" + table_html
-        logger.info("[入库] 表格描述生成: {} 字符", len(item['text']))
+        try:
+            response = llm.invoke([message])
+            content = response.content if isinstance(response.content, str) else str(response.content)
+            # text = 描述 + 原始 HTML(描述用于检索匹配, HTML 用于展示)
+            item['text'] = content + "\n\n" + table_html
+            logger.info("[入库] 表格描述生成: {} 字符", len(content))
+        except Exception as e:
+            # D5 修复: 单项失败保留原始 HTML, 不中断整个管道
+            logger.warning("[入库] 表格描述生成失败, 保留原始 HTML: {} - {}", item.get('filename', ''), e)
+            item['text'] = table_html
 
     return data_list

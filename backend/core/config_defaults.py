@@ -76,16 +76,22 @@ DEFAULTS: Dict[str, ConfigItem] = {
         0.8, "float", "retrieval", "fuse", "历史记忆融合权重",
         "历史记忆在多路融合中的权重（低于知识库的 1.0）。调低可减弱历史回答对当前回答的干扰。", "hot",
     ),
+    # ---- 嵌入重试 ----
+    "retrieval.embed_retries": ConfigItem(
+        2, "int", "retrieval", "embed", "检索嵌入失败重试次数",
+        "检索时的文本/图片向量化请求失败（限流或服务端错误）时自动重试的最大次数（不含首次尝试）。"
+        "降低限流时检索通道被静默丢弃的概率。", "hot",
+    ),
+    "retrieval.embed_backoff": ConfigItem(
+        1.0, "float", "retrieval", "embed", "检索嵌入重试等待（秒）",
+        "重试之间的基础等待时长，按指数递增；服务返回限流建议（Retry-After）时优先按其建议等待。", "hot",
+    ),
 
     # ============ 评估(evaluation) ============
     # ---- 阈值与兜底 ----
     "evaluate.threshold": ConfigItem(
         0.7, "float", "evaluation", "threshold", "回答通过阈值（评判分数线）",
         "系统对回答质量的自动评分通过线（0~1）。评分低于该值的回答转入人工审批；评估过程异常时不拦截。", "hot",
-    ),
-    "evaluate.parse_fallback": ConfigItem(
-        0.5, "float", "evaluation", "threshold", "评分解析失败兜底分",
-        "自动评分结果无法解析时使用的兜底分值。取值偏保守，会触发人工审批，避免低质量回答直接放行。", "hot",
     ),
     # ---- 维度默认分 ----
     "evaluate.dim_default": ConfigItem(
@@ -130,5 +136,17 @@ DEFAULTS: Dict[str, ConfigItem] = {
     "rag.history_images_to_model": ConfigItem(
         1, "int", "rag", "images", "评审参考历史图数",
         "自动评审时从历史对话还原的最多图片数，用于核实回答对历史图片的引用是否属实。", "hot",
+    ),
+
+    # ============ 记忆(memory) ============
+    # ---- 时效与淘汰(2026-08: 修 KNOWN_ISSUES #4, 检索硬 TTL + 软衰减 + 每用户上限) ----
+    "memory.ttl_days": ConfigItem(
+        180, "int", "memory", "policy", "记忆有效期（天）",
+        "跨会话记忆超过该天数后不再被检索召回，并由后台任务清理。业务知识会过期（旧数据/旧流程），"
+        "过期记忆不该再作为回答依据。", "hot",
+    ),
+    "memory.max_per_user": ConfigItem(
+        500, "int", "memory", "policy", "每用户记忆条数上限",
+        "每个用户的记忆库最多保留的条目数，超出后自动淘汰最旧的。控制记忆库无限增长带来的检索噪声与存储。", "hot",
     ),
 }

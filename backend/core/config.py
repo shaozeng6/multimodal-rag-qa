@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     INGEST_TMP_DIR: str = "ingest_tmp"
     INGEST_OCR_THREADS: int = 16
     INGEST_OCR_DPI: int = 200
+    # PDF 上传大小上限(MB, 修 A12: 超限 413, 流式落盘不再整文件读入内存)
+    MAX_PDF_UPLOAD_MB: int = 50
 
     # ---- 消息图片存储(schema_v2: 不存 base64, 落文件后存引用) ----
     # 该目录通过 main.py 的 /uploads 静态挂载暴露给前端

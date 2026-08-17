@@ -5,19 +5,26 @@
 - relation: 图与用户文本的相关性("related"/"unrelated"), 决定 caption 是否融合进检索查询
 
 健壮性: LLM 异常/解析失败一律兜底 ("", ""), 绝不中断工作流。
+解析用公共 extract_json(P0-4): 兼容块式 content / markdown 围栏 / 内容含花括号,
+并区分"模型无输出"与"输出无法解析"两种失败, 便于排查纯图 caption 断桥问题。
 """
-import json
-import re
 from typing import Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
+
+from graph.json_utils import extract_json
 
 # caption 生成温度(低温, 减少描述幻觉)
 IMAGE_CAPTION_TEMPERATURE = 0.3
 
 # 图文关系三态: related(文字指向图) / unrelated(图是附件) / contradictory(文字与图矛盾)
 _RELATION_VALID = ("related", "unrelated", "contradictory")
+
+
+def _preview(raw) -> str:
+    """日志里的输出预览(截断)。"""
+    return (str(raw) or "")[:200]
 
 
 async def analyze_image(
@@ -65,13 +72,15 @@ async def analyze_image(
 
     try:
         response = await llm.ainvoke(messages)
-        raw = response.content if isinstance(response.content, str) else str(response.content)
-        # 健壮 JSON 解析(兼容模型输出 markdown 代码块等杂质, 与 judge 同一模式)
-        json_match = re.search(r'\{[^}]+\}', raw)
-        if not json_match:
-            logger.warning("[图片理解] 返回非 JSON: {}", raw[:200])
+        # 直接传 response.content(可能是块列表), 由 extract_json 统一处理(C3)
+        data = extract_json(response.content)
+        if data is None:
+            # 区分"模型无输出"与"输出无法解析", 避免纯图 caption 断桥时无法定位
+            if not response.content:
+                logger.warning("[图片理解] 模型无输出, 兜底空 caption")
+            else:
+                logger.warning("[图片理解] 输出无法解析为 JSON: {}", _preview(response.content))
             return "", ""
-        data = json.loads(json_match.group())
         caption = str(data.get("caption") or "").strip()
         relation = str(data.get("relation") or "").strip().lower()
         if relation not in _RELATION_VALID:

@@ -4,6 +4,7 @@ collections_operator.py / db_retriever.py / tools.py 抽离并适配企业版配
 所有配置从环境变量 / core.config.settings 读取，不硬编码。
 """
 import os
+import threading
 import time
 from http import HTTPStatus
 from typing import Dict, List, Optional, Tuple
@@ -151,32 +152,40 @@ m_re = MilvusRetriever(COLLECTION_NAME, milvus_client)
 
 # ========= Embedding 工具(达摩院多模态嵌入，从 embeddings_utils.py 抽离) =========
 class FixedWindowRateLimiter:
-    """固定窗口速率限制器类，用于控制 API 调用频率。"""
+    """固定窗口速率限制器类，用于控制 API 调用频率。
+
+    线程安全(C2 修复): acquire 可能被多个线程并发调用(检索侧 asyncio.to_thread
+    并行 _embed、入库侧 daemon 线程), count/window_start 的读改写必须互斥,
+    否则同一窗口会超发请求或重复等待。等待期间持有锁, 并发调用被串行化,
+    总速率严格不超过 limit/window。
+    """
 
     def __init__(self, limit: int, window_seconds: int):
         self.limit = limit
         self.window_seconds = window_seconds
         self.window_start = time.monotonic()  # 当前时间窗口的开始时间
         self.count = 0  # 当前时间窗口内的请求计数
+        self._lock = threading.Lock()
 
     def acquire(self):
         """获取请求许可，如果需要会阻塞直到可以继续请求"""
-        now = time.monotonic()
-        elapsed = now - self.window_start
+        with self._lock:
+            now = time.monotonic()
+            elapsed = now - self.window_start
 
-        if elapsed >= self.window_seconds:
-            self.window_start = now
-            self.count = 0
+            if elapsed >= self.window_seconds:
+                self.window_start = now
+                self.count = 0
 
-        if self.count >= self.limit:
-            sleep_sec = self.window_seconds - elapsed
-            if sleep_sec > 0:
-                logger.info("DashScope 限速：达到 {} 次请求，等待 {:.2f}s", self.limit, sleep_sec)
-                time.sleep(sleep_sec)
-            self.window_start = time.monotonic()
-            self.count = 0
+            if self.count >= self.limit:
+                sleep_sec = self.window_seconds - elapsed
+                if sleep_sec > 0:
+                    logger.info("DashScope 限速：达到 {} 次请求，等待 {:.2f}s", self.limit, sleep_sec)
+                    time.sleep(sleep_sec)
+                self.window_start = time.monotonic()
+                self.count = 0
 
-        self.count += 1
+            self.count += 1
 
 
 limiter = FixedWindowRateLimiter(RPM_LIMIT, WINDOW_SECONDS)

@@ -12,6 +12,7 @@ import ast
 import asyncio
 import hashlib
 import json
+import time
 from typing import Dict, List, Optional
 
 from loguru import logger
@@ -33,6 +34,12 @@ MEMORY_TOPK = 3      # 记忆路候选数
 CONTEXT_TOPK = 8     # 融合后进入生成器的上下文条数
 RRF_K = 60           # RRF 平滑常数
 MEMORY_WEIGHT = 0.8  # 记忆路 RRF 权重(低于知识库路)
+RETRIEVAL_EMBED_RETRIES = 2    # 检索嵌入失败重试次数(不含首次; sys_config hot 覆盖)
+RETRIEVAL_EMBED_BACKOFF = 1.0  # 重试基础退避秒数(指数递增)
+MAX_RETRY_SLEEP = 30.0         # 单次重试等待上限(防 Retry-After 异常大值卡死请求)
+MEMORY_TTL_DAYS = 180          # 记忆硬 TTL(天): 检索过滤 + 后台清理共用; sys_config hot 覆盖
+MEMORY_FRESH_30D = 30.0        # 记忆软衰减分段: ≤30 天 freshness=1.0
+MEMORY_FRESH_90D = 90.0        # ≤90 天 freshness=0.5, 更老 0.25
 
 
 def _text_topk() -> int:
@@ -58,19 +65,48 @@ def _rrf_k() -> int:
 def _memory_weight() -> float:
     return get_float("retrieval.memory_weight", MEMORY_WEIGHT)
 
+
+def _memory_ttl_days() -> int:
+    return get_int("memory.ttl_days", MEMORY_TTL_DAYS)
+
 # ========= 阻塞调用包装 =========
 
+def _retryable_embed(status_code: Optional[int]) -> bool:
+    """嵌入失败是否值得重试: 429 限流 / 5xx 服务端错误 / 调用异常(None) 可重试;
+    4xx(400/403/404 等)为永久性失败, 不重试(与入库侧 D10 同类问题, 检索侧先修)。"""
+    return status_code is None or status_code == 429 or (status_code or 0) >= 500
+
+
 async def _embed(input_data: list) -> Optional[List[float]]:
-    """包到线程中调用 DashScope 多模态 embedding(限流器含 time.sleep)。"""
-    try:
-        ok, emb, status_code, retry_after = await asyncio.to_thread(call_dashscope_once, input_data)
+    """包到线程中调用 DashScope 多模态 embedding(限流器含 time.sleep)。
+
+    KNOWN_ISSUES #6 修复: 429/5xx 按 Retry-After 或指数退避重试(原实现只打日志
+    不重试, 限流即静默丢一路检索); 4xx 永久失败不重试。次数/退避由 sys_config
+    hot 覆盖(retrieval.embed_retries / retrieval.embed_backoff)。
+    """
+    max_retries = get_int("retrieval.embed_retries", RETRIEVAL_EMBED_RETRIES)
+    base_backoff = get_float("retrieval.embed_backoff", RETRIEVAL_EMBED_BACKOFF)
+    attempts = 0
+    while True:
+        try:
+            ok, emb, status_code, retry_after = await asyncio.to_thread(
+                call_dashscope_once, input_data
+            )
+        except Exception as e:
+            logger.exception("嵌入调用异常: {}", e)
+            ok, emb, status_code, retry_after = False, None, None, None
+        attempts += 1
         if ok and emb:
             return emb
-        logger.warning("嵌入向量获取失败, status={}, code={}", status_code, retry_after)
-        return None
-    except Exception as e:
-        logger.exception("嵌入调用异常: {}", e)
-        return None
+        if attempts > max_retries or not _retryable_embed(status_code):
+            # C9 修复: status/retry_after 各归各位(原实现把 retry_after 打在 code= 位)
+            logger.warning("嵌入向量获取失败(重试 {} 次后放弃): status={}, retry_after={}",
+                           attempts - 1, status_code, retry_after)
+            return None
+        sleep_sec = min(retry_after or (base_backoff * (2 ** (attempts - 1))), MAX_RETRY_SLEEP)
+        logger.warning("嵌入向量获取失败(status={}), {:.2f}s 后第 {} 次重试",
+                       status_code, sleep_sec, attempts)
+        await asyncio.sleep(sleep_sec)
 
 
 async def _search_doc_text(emb: List[float], query: str, limit: int) -> list:
@@ -105,20 +141,33 @@ async def _search_context(query: str, limit: int, user_id: Optional[int] = None)
     - 回答路(context_dense / context_sparse): 兜 recall —— 语义相关但字面与问题不重叠时命中
     四条路经 WeightedRanker 融合, 问题路权重更高; 命中后输出 question + context_text(答案)。
 
+    时效策略(2026-08, 修 KNOWN_ISSUES #4):
+    - 硬 TTL: expr 追加 `timestamp > now - ttl`(memory.ttl_days), 过时记忆直接不召回,
+      避免把过期业务知识当回答依据
+    - 软衰减: 命中按 score × freshness(age) 重排再截断 top —— 近期答案优先进 top,
+      老答案除非高度相关否则让位
+
     关键: question_dense/context_dense 均由 persist_context 用 embedding.embed_query(OpenAIEmbeddings)
     写入, 检索必须用同一 embedding 模型生成查询向量, 否则向量空间不一致, 语义检索失效。
     user_id: 当前用户数字 id; 记忆库跨会话共享但**必须按用户隔离**(修 KNOWN_ISSUES #3 隐私泄漏)。
     写入侧把 user_id 存为字符串, 这里过滤 `user == "user_id"`(改名不影响归属)。
     """
+    ttl_days = _memory_ttl_days()
+
     def _sync():
         try:
             dense_vec = embedding.embed_query(query)
         except Exception as e:
             logger.warning("记忆检索向量生成失败: {}", e)
             return []
-        filter_expr = None
+        # 硬 TTL: 只召回未过期记忆(timestamp 缺失的旧条目视为过期, 被过滤)
+        expr_parts = []
         if user_id is not None:
-            filter_expr = 'user == "{}"'.format(user_id)
+            expr_parts.append('user == "{}"'.format(user_id))
+        if ttl_days and ttl_days > 0:
+            cutoff_ms = int(time.time() * 1000) - ttl_days * 86400 * 1000
+            expr_parts.append("timestamp > {}".format(cutoff_ms))
+        filter_expr = " and ".join(expr_parts) if expr_parts else None
         dense_params = {"metric_type": "IP", "params": {"nprobe": 10}}
         bm25_params = {"metric_type": "BM25", "params": {"drop_ratio_search": 0.2}}
         reqs = [
@@ -133,15 +182,51 @@ async def _search_context(query: str, limit: int, user_id: Optional[int] = None)
             # 权重须在 [0,1] 且与 reqs 顺序一致; 问题路主检, 回答路兜底
             ranker=WeightedRanker(0.7, 0.7, 0.4, 0.4),
             limit=limit,
-            output_fields=["question", "context_text"],
+            output_fields=["question", "context_text", "timestamp"],
         )
-        return res[0] if res else []
+        hits = res[0] if res else []
+        if not hits:
+            return []
+        # 软衰减: score' = score × freshness(age), 重排后取 top limit
+        now_ms = int(time.time() * 1000)
+        for h in hits:
+            ts = _hit_timestamp_ms(h)
+            h["_fresh"] = _freshness((now_ms - ts) / 86400_000.0) if ts else 0.25
+        hits.sort(
+            key=lambda h: (h.get("score") or h.get("distance") or 0.0) * h["_fresh"],
+            reverse=True,
+        )
+        return hits[:limit]
 
     try:
         return await asyncio.to_thread(_sync)
     except Exception as e:
         logger.warning("历史上下文检索失败(可能集合为空或不存在): {}", e)
         return []
+
+
+def _freshness(age_days: float) -> float:
+    """记忆时效系数(软衰减): ≤30 天 1.0, ≤90 天 0.5, 更老 0.25。
+
+    与硬 TTL 分工: TTL 决定"还能不能出现", freshness 决定"出现时排多靠前"。
+    """
+    if age_days <= MEMORY_FRESH_30D:
+        return 1.0
+    if age_days <= MEMORY_FRESH_90D:
+        return 0.5
+    return 0.25
+
+
+def _hit_timestamp_ms(hit: dict) -> Optional[int]:
+    """从命中提取写入时间戳(毫秒); 兼容 Milvus 3.0 entity 字符串化。"""
+    ent = _hit_entity(hit)
+    ts = hit.get("timestamp") or ent.get("timestamp")
+    if ts is None:
+        return None
+    try:
+        return int(ts)
+    except (TypeError, ValueError):
+        return None
 
 
 # ========= 后处理链 =========
@@ -182,10 +267,17 @@ def _hit_text(hit: dict) -> str:
 
 
 def _hit_key(hit: dict) -> str:
-    """去重键: 优先 id, 缺失时退化为 text 的 sha256(避免 String.hashCode 碰撞)。"""
+    """去重键: 优先 id, 缺失时退化为 text 的 sha256(避免 String.hashCode 碰撞)。
+
+    带 _source 命名空间(C8 修复): 知识库(t_doc)与记忆(t_context)两个集合的
+    auto_id 主键各自从 1 递增, 直接拼 id 会跨集合误去重(同主键的文档与记忆
+    条目被当成同一条); 记忆条目经 _memo_to_doc 转换后保留原始 id 并标记
+    _source="memory", 与文档路键不冲突。
+    """
     hit_id = hit.get("id") or hit.get("pk")
     if hit_id:
-        return f"id:{hit_id}"
+        source = hit.get("_source") or "doc"
+        return f"{source}:{hit_id}"
     return "sha:" + hashlib.sha256(_hit_text(hit).encode("utf-8")).hexdigest()
 
 
@@ -361,9 +453,13 @@ def _memo_to_doc(hit: dict) -> dict:
     """把 t_context 命中(hit 结构)统一为与文档路一致的结构。
 
     text 带上前置问题(问/答形式), 让生成器知道这条记忆的来由; 无问题时只给答案。
+    保留原始 id 并标记 _source="memory"(C8 修复): 记忆条目不再退化为 sha256(text)
+    去重键 —— 同文本的不同记忆条目不误折叠, 也不会与知识库文档主键(id 命名空间
+    重叠)互相误去重。
     """
     ent = _hit_entity(hit)
     answer = hit.get("context_text") or ent.get("context_text") or ""
     question = hit.get("question") or ent.get("question") or ""
     text = f"问: {question}\n答: {answer}" if question else answer
-    return {"text": text, "category": "memory", "image_path": None, "filename": None}
+    return {"text": text, "category": "memory", "image_path": None, "filename": None,
+            "id": hit.get("id") or ent.get("id"), "_source": "memory"}

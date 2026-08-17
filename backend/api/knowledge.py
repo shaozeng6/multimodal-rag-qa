@@ -4,6 +4,7 @@
 上传接口立即返回 job_id, 前端轮询 GET /knowledge/jobs/{id} 获取进度。
 """
 import asyncio
+import hashlib
 import os
 import uuid
 
@@ -15,6 +16,7 @@ from core.deps import require_admin
 from ingestion.documents import (
     cleanup_job_files,
     count_documents_by_filename,
+    count_documents_by_md5,
     get_document,
     list_uploads,
     remove_document,
@@ -44,12 +46,6 @@ from services.image_store import resolve_image_url
 router = APIRouter(prefix="/knowledge", tags=["知识库"])
 
 
-def _write_file(path: str, content: bytes) -> None:
-    """同步写文件(放到 to_thread 中执行, 避免阻塞事件循环)。"""
-    with open(path, "wb") as f:
-        f.write(content)
-
-
 @router.post("/upload")
 async def upload_pdf(
     file: UploadFile = File(...),
@@ -59,6 +55,9 @@ async def upload_pdf(
     """上传 PDF 到知识库, 触发异步入库管道, 立即返回 job_id。
 
     mode: auto 自动全流程(默认) / manual 上传后先不处理(停在首阶段, 点「继续」后一路处理)。
+
+    A12 修复: 流式分块落盘 + 大小上限(MAX_PDF_UPLOAD_MB, 超限 413), 不再整文件读入内存;
+    D2 修复: 落盘同时算源文件 md5, 与已入库文档按内容查重(重复 409, 避免重复向量)。
     """
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
@@ -68,15 +67,44 @@ async def upload_pdf(
     if mode not in ("auto", "manual"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode 仅支持 auto/manual")
 
-    content = await file.read()
-    size_mb = len(content) / (1024 * 1024)
-    logger.info("管理员 {} 上传 PDF: {}, 大小 {:.2f} MB, 模式={}", current_user.username, file.filename, size_mb, mode)
-
-    # 保存到临时目录(文件名用 job_id, 避免冲突; 真实文件名仅作元数据)
+    max_bytes = settings.MAX_PDF_UPLOAD_MB * 1024 * 1024
     os.makedirs(settings.INGEST_TMP_DIR, exist_ok=True)
     job_id = uuid.uuid4().hex[:12]
     pdf_path = os.path.join(settings.INGEST_TMP_DIR, f"{job_id}.pdf")
-    await asyncio.to_thread(_write_file, pdf_path, content)
+
+    # 流式读取: 边读边写边算 md5; 超限立即中止并清理, 不占内存
+    md5 = hashlib.md5()
+    total = 0
+    with open(pdf_path, "wb") as f:
+        while True:
+            chunk = await file.read(1 << 20)  # 1MB 分块
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                f.close()
+                os.remove(pdf_path)
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"PDF 超过大小限制({settings.MAX_PDF_UPLOAD_MB}MB)",
+                )
+            md5.update(chunk)
+            f.write(chunk)
+    if total == 0:
+        os.remove(pdf_path)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上传文件为空")
+
+    file_md5 = md5.hexdigest()
+    # D2: 内容查重 —— 同 md5 已入库则拒绝(409), 避免重复文档行+重复 Milvus 向量
+    if await asyncio.to_thread(count_documents_by_md5, file_md5) > 0:
+        os.remove(pdf_path)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该文件已入库过(内容相同), 请勿重复上传",
+        )
+
+    size_mb = total / (1024 * 1024)
+    logger.info("管理员 {} 上传 PDF: {}, 大小 {:.2f} MB, 模式={}", current_user.username, file.filename, size_mb, mode)
 
     original_name = os.path.basename(file.filename)
     # start_job 写 MySQL(同步引擎), 放线程避免阻塞事件循环

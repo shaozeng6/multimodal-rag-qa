@@ -3,14 +3,14 @@
 评审模型与生成模型分离(纯文本用 judge_llm, 含图片时用多模态 multiModal_llm),
 消除"自评自答"的同源偏置。评估失败(evaluate_score=None)由路由静默放行, 不打扰用户。
 """
-import json
-import re
+from typing import Optional
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
 
 from graph.context import format_history, get_working_window
+from graph.json_utils import extract_json
 from graph.llm_init import judge_llm, multiModal_llm
 from graph.nodes_shared import (
     _CATEGORY_LABELS,
@@ -21,7 +21,7 @@ from graph.nodes_shared import (
     _retrieved_images_for_model,
 )
 from graph.state import MultiModalRAGState
-from services.config_service import get_float, get_int
+from services.config_service import get_int
 
 
 def _collect_judge_images(state: MultiModalRAGState) -> list:
@@ -138,26 +138,34 @@ def _build_judge_prompt(state: MultiModalRAGState, images: list) -> str:
 {json_schema}"""
 
 
-def _parse_judge_score(raw: str, has_image: bool) -> float:
-    """解析评审 JSON, 三维度取 min(木桶效应)。格式异常/解析失败给兜底分(默认 0.5, 偏安全走人工审批)。"""
-    # 兜底与维分默认值从 sys_config 读(hot 生效), 常量作默认值兜底
-    parse_fallback = get_float("evaluate.parse_fallback", 0.5)
+def _preview(raw) -> str:
+    """评审/图片理解日志里的输出预览(截断)。"""
+    return (str(raw) or "")[:200]
+
+
+def _parse_judge_score(raw, has_image: bool) -> Optional[float]:
+    """解析评审 JSON, 三维度取 min(木桶效应)。
+
+    解析失败返回 None(由路由静默放行, 区别于"答得差"的低分): judge 输出格式
+    抖动(代码块/花括号被回显、块式结构、围栏包裹)是基础设施问题, 不该把好回答
+    误判进人工审批/审核队列(B5/B6 修复, 原实现解析失败回落 0.5)。
+    """
+    # 维分默认值从 sys_config 读(hot 生效), 常量作默认值兜底
     dim_default = get_int("evaluate.dim_default", 5)
     image_fidelity_default = get_int("evaluate.image_fidelity_default", 10)
+    data = extract_json(raw)
+    if data is None:
+        logger.warning("LLM Judge 评分解析失败(静默放行, 区别于低分), 原始输出: {}", _preview(raw))
+        return None
     try:
-        json_match = re.search(r'\{[^}]+\}', raw)
-        if not json_match:
-            logger.warning("LLM Judge 返回格式异常, 原始输出: {}", raw[:200])
-            return parse_fallback
-        scores = json.loads(json_match.group())
-        relevance = scores.get('relevance', dim_default) / 10.0
-        faithfulness = scores.get('faithfulness', dim_default) / 10.0
+        relevance = float(data.get("relevance", dim_default)) / 10.0
+        faithfulness = float(data.get("faithfulness", dim_default)) / 10.0
         # 有图时读取图文一致性维度; 缺省给 10(视为无图文不一致风险: 回答未涉及图或已核对),
         # 避免旧模型漏输出该字段时默认 5 被 min() 木桶效应误判低分(知识蒸馏案例根因)
-        image_fidelity = (scores.get('image_fidelity', image_fidelity_default) / 10.0) if has_image else 1.0
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.warning("LLM Judge 评分解析失败: {}, 原始输出: {}", e, raw[:200])
-        return parse_fallback
+        image_fidelity = (float(data.get("image_fidelity", image_fidelity_default)) / 10.0) if has_image else 1.0
+    except (TypeError, ValueError) as e:
+        logger.warning("LLM Judge 评分字段非法(静默放行): {}, 原始输出: {}", e, _preview(raw))
+        return None
 
     if has_image:
         logger.info("LLM Judge 评分 - relevance: {:.1f}, faithfulness: {:.1f}, image_fidelity: {:.1f}",
@@ -209,9 +217,12 @@ async def evaluate_answer(state: MultiModalRAGState, config: RunnableConfig):
         for url in judge_images:
             user_content.append({"type": "image_url", "image_url": {"url": url}})
         response = await judge.ainvoke([HumanMessage(content=user_content)], config=config)
-        raw = response.content if isinstance(response.content, str) else str(response.content)
-
-        score = _parse_judge_score(raw, has_judge_image)
+        # 直接传 response.content(可能是块列表), 由 extract_json 统一处理
+        score = _parse_judge_score(response.content, has_judge_image)
+        if score is None:
+            # 解析失败 ≠ 低分: 按"评估失败"处理, 路由静默放行, 不打扰用户
+            logger.warning("[节点] evaluate_answer: 评审输出无法解析, 返回 None 静默放行")
+            return {"evaluate_score": None}
         logger.info("[节点] evaluate_answer 完成: LLM Judge 分数={:.3f}", score)
         return {"evaluate_score": float(score)}
     except Exception as e:

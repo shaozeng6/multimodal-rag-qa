@@ -21,6 +21,12 @@ MAX_RETRIES = 3  # 默认值兜底, 运行时由 sys_config 覆盖
 BASE_BACKOFF = 1.0  # 秒
 
 
+def _retryable(status_code) -> bool:
+    """向量化失败是否值得重试(D10 修复): 429 限流 / 5xx 服务端错误 / 调用异常(None)
+    可重试; 400/403/404 等永久性失败不重试, 避免每项白等约 3s。"""
+    return status_code is None or status_code == 429 or (status_code or 0) >= 500
+
+
 def process_item(item: Dict) -> Optional[Dict]:
     """单个数据项向量化。图片走纯视觉嵌入(对称), 文本走文本嵌入。
 
@@ -41,8 +47,8 @@ def process_item(item: Dict) -> Optional[Dict]:
 
     ok, embedding, status_code, retry_after = call_dashscope_once(input_data)
     attempts = 1
-    while not ok and attempts < max_retries:
-        # 429 时按 Retry-After 等待, 否则指数退避
+    while not ok and attempts < max_retries and _retryable(status_code):
+        # 429 时按 Retry-After 等待, 否则指数退避; 永久 4xx 不重试(D10)
         sleep_sec = retry_after or (base_backoff * (2 ** (attempts - 1)))
         logger.warning("[入库] 向量化失败(status={}), {}s 后第 {} 次重试",
                        status_code, round(sleep_sec, 2), attempts)

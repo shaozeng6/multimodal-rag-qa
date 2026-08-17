@@ -89,7 +89,10 @@ export const useChatStore = defineStore('chat', () => {
     if (currentSessionId.value === id) return;
     currentSessionId.value = id;
     currentSession.value = sessions.value.find((s) => s.id === id) || null;
-    pendingApproval.value = null;
+    // P0-2: 审批弹窗与会话绑定 —— 切回有未决审批的会话时恢复弹窗,
+    // 避免线程停在审批中断点却无 UI 可处理(审批只能显式通过/驳回)
+    pendingApproval.value =
+      pendingApproval.value?.session_id === id ? pendingApproval.value : null;
     activeAiId.value = null; // 切换会话后不展示历史执行链路
     await loadMessages(id);
   }

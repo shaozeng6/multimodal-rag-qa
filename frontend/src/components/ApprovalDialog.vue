@@ -73,6 +73,8 @@ function handleReject(): void {
     width="520px"
     align-center
     :close-on-click-modal="false"
+    :close-on-press-escape="false"
+    :show-close="false"
     class="approval-dialog"
   >
     <div v-if="approval" class="approval-body">

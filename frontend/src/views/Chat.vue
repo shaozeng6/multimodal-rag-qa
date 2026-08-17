@@ -40,6 +40,11 @@ function scrollToBottom(): void {
 
 /** 新建会话 */
 async function handleNewSession(): Promise<void> {
+  // P0-2: 流式输出中禁止新建会话(会切换 currentSession, 使审批/流式事件落到错误会话)
+  if (chatStore.streaming) {
+    ElMessage.warning('正在回复中, 请等待回复结束后再新建会话');
+    return;
+  }
   await chatStore.createSession();
   router.push({
     path: '/chat',
@@ -49,6 +54,12 @@ async function handleNewSession(): Promise<void> {
 
 /** 选中会话(由 SessionList 触发) */
 function handleSelectSession(id: string): void {
+  // P0-2/E1: 流式输出中禁止切换会话, 否则旧 SSE 回调继续往孤儿 aiMessage 追加、
+  // 审批/中断事件可能落到错误会话
+  if (chatStore.streaming) {
+    ElMessage.warning('正在回复中, 请等待回复结束后再切换会话');
+    return;
+  }
   sidebarOpen.value = false; // 移动端选中后收起抽屉
   router.push({ path: '/chat', query: { sessionId: id } });
 }

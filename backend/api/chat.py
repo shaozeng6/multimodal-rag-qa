@@ -4,9 +4,15 @@ Phase A+B 重构后:
 - 对话历史(干净[human,ai]对 + 摘要)由 persist_context 节点维护, 不再依赖 messages 字段
 - AI 回复持久化(MySQL + Milvus)移入 persist_context 节点
 - 本模块只负责: 参数校验、构造输入、SSE 流式转发、审批中断恢复
+
+P0-2/P0-3(2026-08): 审批/恢复状态机加固 + SSE 断开残留运行收尾:
+- /approve 校验线程确实停在审批中断点(防重复/完成后再审批), 同线程并发运行防护
+- 新 chat 前若线程有"非审批中断"的未完成节点(上轮 SSE 被客户端掐断), 先
+  astream(None) 收尾再开始新一轮, 避免新输入与旧残留分支混合污染状态
 """
 import asyncio
 import json
+import threading
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -35,6 +41,25 @@ _SSE_HEADERS = {
 # query_rewriter / evaluate_node 等节点内部也会调用 LLM, 其 token 不应展示给用户
 _ANSWER_NODES = {"generator_node", "regenerate_node"}
 
+# ============ 同线程并发运行防护(P0-2, 单进程内; chat 流与审批恢复流共用) ============
+# 多 worker 部署需换成 Redis 分布式锁, 此处先覆盖单进程场景。
+_busy_threads: set = set()
+_busy_lock = threading.Lock()
+
+
+def _try_acquire_thread(thread_id: str) -> bool:
+    """占用线程运行权, 失败表示该线程已有流在跑(chat 或审批恢复)。"""
+    with _busy_lock:
+        if thread_id in _busy_threads:
+            return False
+        _busy_threads.add(thread_id)
+        return True
+
+
+def _release_thread(thread_id: str) -> None:
+    with _busy_lock:
+        _busy_threads.discard(thread_id)
+
 
 class ChatRequest(BaseModel):
     """对话请求体。"""
@@ -55,7 +80,41 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-async def _stream_graph_events(input_data, config):
+async def _finish_abandoned_run(config) -> Optional[str]:
+    """若线程有上一轮中断残留的未完成节点, 先让其自然收尾。
+
+    P0-3 背景: SSE 客户端断开时 StreamingResponse 会取消 event_stream 生成器,
+    graph.astream 在任意 await 点被掐断, checkpoint 停留在"未完成的 super-step"
+    (next 挂着未执行节点)。若直接对新消息 astream(新输入), LangGraph 会把新输入
+    并进旧残留分支, 造成状态污染; 这里先用 astream(None) 把旧分支跑完(重新生成/
+    评估/持久化), 再开始新一轮。
+
+    Returns:
+        None 表示可安全开始新一轮; 非 None 为需要告知前端的错误文案
+        (收尾后停在审批中断点的情况)。
+    """
+    state = await graph.aget_state(config)
+    pending = [n for n in (state.next or []) if n != "human_approval"]
+    if not pending:
+        return None
+    thread_id = config.get("configurable", {}).get("thread_id", "?")
+    logger.warning("[恢复] 会话 {} 有上一轮中断残留的未完成节点 {}, 先收尾再开始新一轮",
+                   thread_id, pending)
+    try:
+        async for _ in graph.astream(None, config, stream_mode="updates"):
+            pass
+    except Exception as e:
+        # 收尾失败: 不阻断新一轮(风险低于把状态彻底卡死), 但记日志
+        logger.exception("[恢复] 会话 {} 残留运行收尾失败: {}", thread_id, e)
+        return None
+    # 收尾可能停在审批中断点(如管理员低分回答) —— 不允许直接发新消息
+    state = await graph.aget_state(config)
+    if "human_approval" in (state.next or []):
+        return "上一轮回答已生成但需要人工审批, 请先完成审批后再提问"
+    return None
+
+
+async def _stream_graph_events(input_data, config, session_id: Optional[str] = None):
     """通用:消费 graph.astream(stream_mode=['messages','updates']) 并产出 SSE 事件流。
 
     多模式订阅:
@@ -110,7 +169,9 @@ async def _stream_graph_events(input_data, config):
         draft = state.values.get("answer", "")
         yield _sse({
             "type": "interrupt",
-            "approval": {"score": score_display, "query": query, "draft": draft},
+            # session_id 让前端把审批弹窗与会话绑定(切走再切回可恢复弹窗, P0-2)
+            "approval": {"score": score_display, "query": query, "draft": draft,
+                         "session_id": session_id or (config.get("configurable", {}).get("thread_id") or "")},
         })
     else:
         # 正常结束,返回最终回答(附带评估置信分, 前端展示"置信章")
@@ -166,6 +227,15 @@ async def chat(
 
     config = {"configurable": {"thread_id": session_id, "user_name": current_user.username}}
 
+    # P0-2: 线程停在审批中断点时不允许直接发新消息(新输入会并进旧审批分支)。
+    # 前端正常情况下会恢复审批弹窗; 这里是并发/双开等场景的安全网。
+    state = await graph.aget_state(config)
+    if "human_approval" in (state.next or []):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该会话有一轮回答等待人工审批, 请先完成审批后再提问",
+        )
+
     # 输入模态由 input_text/input_image 决定, 无需单独传 input_type(process_input 本地派生)
     input_data = {
         "user": current_user.username,
@@ -177,26 +247,39 @@ async def chat(
     }
 
     async def event_stream():
-        # 持久化用户消息(流开始前先存,即使后续流失败也保留用户输入)
-        # schema_v2: 输入图片 base64 → 落文件存引用, 不塞 JSON
-        saved_image = await asyncio.to_thread(save_image_from_data_uri, req.image) if req.image else None
-        await save_message(
-            session_id, "human", req.text or "",
-            images=[saved_image] if saved_image else [],
-        )
-        # 自动生成会话标题(仅首次对话,标题仍为"新会话"时触发)
-        if req.text or req.image:
-            new_title = await auto_title_session(
-                db, session_id, current_user.id, req.text or "", req.image or None
-            )
-            if new_title:
-                yield _sse({"type": "title_update", "title": new_title})
+        # 同线程并发防护: 上一个流未结束(chat/审批)时拒绝, 避免双流竞争同一 checkpoint
+        if not _try_acquire_thread(session_id):
+            yield _sse({"type": "error", "message": "该会话正在处理中, 请稍后再试"})
+            return
         try:
-            async for chunk in _stream_graph_events(input_data, config):
-                yield chunk
-        except Exception as e:
-            logger.exception("对话流执行异常: {}", e)
-            yield _sse({"type": "error", "message": str(e)})
+            # P0-3: 上轮 SSE 被客户端中断时先收尾残留运行, 再保存新消息/开始新一轮
+            stale = await _finish_abandoned_run(config)
+            if stale is not None:
+                yield _sse({"type": "error", "message": stale})
+                return
+
+            # 持久化用户消息(流开始前先存,即使后续流失败也保留用户输入)
+            # schema_v2: 输入图片 base64 → 落文件存引用, 不塞 JSON
+            saved_image = await asyncio.to_thread(save_image_from_data_uri, req.image) if req.image else None
+            await save_message(
+                session_id, "human", req.text or "",
+                images=[saved_image] if saved_image else [],
+            )
+            # 自动生成会话标题(仅首次对话,标题仍为"新会话"时触发)
+            if req.text or req.image:
+                new_title = await auto_title_session(
+                    db, session_id, current_user.id, req.text or "", req.image or None
+                )
+                if new_title:
+                    yield _sse({"type": "title_update", "title": new_title})
+            try:
+                async for chunk in _stream_graph_events(input_data, config, session_id):
+                    yield chunk
+            except Exception as e:
+                logger.exception("对话流执行异常: {}", e)
+                yield _sse({"type": "error", "message": str(e)})
+        finally:
+            _release_thread(session_id)
 
     return StreamingResponse(
         event_stream(),
@@ -235,6 +318,16 @@ async def approve(
 
     config = {"configurable": {"thread_id": session_id}}
 
+    # P0-2: 校验线程确实停在审批中断点(防重复审批 / 完成后再审批 / 并发 chat+approve)。
+    # 原先直接 aupdate_state + astream(None) 不校验, 对已完成/重复调用时恢复流
+    # 没有 interrupt/done 终止事件, 前端 SSE 会悬挂。
+    state = await graph.aget_state(config)
+    if "human_approval" not in (state.next or []):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该会话当前不处于待审批状态(可能已审批或会话已结束)",
+        )
+
     # 更新 state 中的 human_answer 和 human_reason
     # human_answer 驱动路由: approve -> persist_context, reject -> regenerate_node
     # human_reason 传递给 regenerate_node, 让它知道为什么草稿被驳回
@@ -242,12 +335,18 @@ async def approve(
     await graph.aupdate_state(config, {"human_answer": action, "human_reason": req.reason or ""})
 
     async def event_stream():
+        # 同线程并发防护: 审批恢复流运行期间拒绝重复提交/新 chat 流
+        if not _try_acquire_thread(session_id):
+            yield _sse({"type": "error", "message": "该会话正在处理中, 请勿重复提交审批"})
+            return
         try:
-            async for chunk in _stream_graph_events(None, config):
+            async for chunk in _stream_graph_events(None, config, session_id):
                 yield chunk
         except Exception as e:
             logger.exception("审批恢复流执行异常: {}", e)
             yield _sse({"type": "error", "message": str(e)})
+        finally:
+            _release_thread(session_id)
 
     return StreamingResponse(
         event_stream(),

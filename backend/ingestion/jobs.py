@@ -167,6 +167,18 @@ def update_job(job_id: str, **fields) -> None:
         db.commit()
 
 
+def _safe_update_job(job_id: str, **fields) -> None:
+    """更新任务状态; 更新本身失败(如 DB 抖动)只记日志不逃逸(D3 修复)。
+
+    原实现 except/取消分支内 update_job 再抛异常会让 daemon 线程静默退出,
+    job 永久卡 running 且无任何日志; 兜住后至少能看到"状态未落库"的告警。
+    """
+    try:
+        update_job(job_id, **fields)
+    except Exception as e:
+        logger.exception("[入库] job {} 更新状态失败(status={}): {}", job_id, fields.get("status"), e)
+
+
 def get_job(job_id: str) -> Optional[dict]:
     """查询任务(含进度/阶段明细/日志尾部)。"""
     with SyncSession() as db:
@@ -252,13 +264,13 @@ def _run_job(job_id: str, pdf_path: str, filename: str, user_id: Optional[int],
         # 成功后清理 OCR md/json/jpg + 临时 PDF; 保留 chunks.json(解析资产, 供重索引)
         _cleanup_intermediate(job_id, keep_chunks=True)
     except JobCancelled:
-        update_job(job_id, status="cancelled", stage="已取消", progress=None)
+        _safe_update_job(job_id, status="cancelled", stage="已取消", progress=None)
         log_job(job_id, "任务已取消, 清理中间产物")
         logger.info("[入库] job {} 已取消", job_id)
         _cleanup_intermediate(job_id, keep_chunks=True)
     except Exception as e:
         logger.exception("[入库] job {} 失败: {}", job_id, e)
-        update_job(job_id, status="error", stage="失败", error=str(e))
+        _safe_update_job(job_id, status="error", stage="失败", error=str(e))
         log_job(job_id, f"任务失败: {e}")
         # 失败不清理: chunks.json(已解析) 供重试复用索引, 临时 PDF 供重试复用解析
     finally:
@@ -303,17 +315,17 @@ def _run_parse(job_id: str, pdf_path: str, filename: str, user_id: Optional[int]
     update_job(job_id, status="running", phase="parse", stage="启动", progress=0, error=None)
     try:
         parse_document(pdf_path, filename, job_id)
-        update_job(job_id, status="pending", phase="parsed", stage="解析完成",
-                   stage_detail="等待入库", progress=100)
+        _safe_update_job(job_id, status="pending", phase="parsed", stage="解析完成",
+                         stage_detail="等待入库", progress=100)
         log_job(job_id, "解析完成, 等待入库")
         logger.info("[入库] job {} 解析完成, 等待入库", job_id)
     except JobCancelled:
-        update_job(job_id, status="cancelled", stage="已取消", progress=None)
+        _safe_update_job(job_id, status="cancelled", stage="已取消", progress=None)
         log_job(job_id, "解析被取消")
         _cleanup_intermediate(job_id, keep_chunks=False)
     except Exception as e:
         logger.exception("[入库] job {} 解析失败: {}", job_id, e)
-        update_job(job_id, status="error", stage="解析失败", error=str(e))
+        _safe_update_job(job_id, status="error", stage="解析失败", error=str(e))
         log_job(job_id, f"解析失败: {e}")
     finally:
         _finish_locks(job_id)
@@ -329,18 +341,18 @@ def _run_index(job_id: str, pdf_path: str, filename: str, user_id: Optional[int]
     try:
         file_size = os.path.getsize(pdf_path) if (pdf_path and os.path.isfile(pdf_path)) else 0
         count = index_document(job_id, filename, user_id, file_size)
-        update_job(job_id, status="success", phase="index", stage="完成",
-                   progress=100, documents_count=count)
+        _safe_update_job(job_id, status="success", phase="index", stage="完成",
+                         progress=100, documents_count=count)
         log_job(job_id, f"入库完成, 共 {count} 条")
         logger.info("[入库] job {} 入库完成, {} 条", job_id, count)
         _cleanup_intermediate(job_id, keep_chunks=True)
     except JobCancelled:
-        update_job(job_id, status="cancelled", stage="已取消", progress=None)
+        _safe_update_job(job_id, status="cancelled", stage="已取消", progress=None)
         log_job(job_id, "入库被取消")
         _cleanup_intermediate(job_id, keep_chunks=True)
     except Exception as e:
         logger.exception("[入库] job {} 索引失败: {}", job_id, e)
-        update_job(job_id, status="error", stage="索引失败", error=str(e))
+        _safe_update_job(job_id, status="error", stage="索引失败", error=str(e))
         log_job(job_id, f"索引失败: {e}")
     finally:
         _finish_locks(job_id)

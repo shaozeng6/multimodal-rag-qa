@@ -17,10 +17,11 @@ from services import config_service
 router = APIRouter(prefix="/config", tags=["系统配置"])
 
 # 稳定的分组展示顺序(模型等基础设施配置归属 .env, 不进配置中心)
-_GROUP_ORDER = ["ingestion", "retrieval", "evaluation", "context", "rag"]
+_GROUP_ORDER = ["ingestion", "retrieval", "memory", "evaluation", "context", "rag"]
 _GROUP_LABELS = {
     "ingestion": "入库",
     "retrieval": "检索",
+    "memory": "记忆",
     "evaluation": "评估",
     "context": "上下文",
     "rag": "图片上限",

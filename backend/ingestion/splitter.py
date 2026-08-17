@@ -68,12 +68,26 @@ class MarkdownDirSplitter:
             logger.warning("SemanticChunker 初始化失败, 回退纯文本切分: {}", e)
 
     def save_base64_to_image(self, base64_str: str, output_path: str) -> None:
-        """将 base64 字符串解码为图像并保存。"""
+        """将 base64 字符串解码为图像并保存。
+
+        D8 修复: 先写临时文件再 os.replace 原子替换 —— 多文档含同图并发入库时,
+        直接 img.save 同一 md5 路径会截断+交错写坏; 原子替换保证任意时刻
+        目标路径要么是完整旧文件要么是完整新文件(内容相同, 谁赢都一样)。
+        """
         if base64_str.startswith("data:image"):
             base64_str = base64_str.split(",", 1)[1]
         img_data = base64.b64decode(base64_str)
         img = Image.open(io.BytesIO(img_data))
-        img.save(output_path)
+        tmp_path = f"{output_path}.tmp"
+        try:
+            img.save(tmp_path)
+            os.replace(tmp_path, output_path)
+        finally:
+            if os.path.isfile(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
     def process_images(self, content: str, source: str) -> List[Document]:
         """处理 Markdown 中的 base64 图片, 提取为图片 Document。"""
@@ -122,7 +136,10 @@ class MarkdownDirSplitter:
         split_documents = self.text_splitter.split_text(content)
         documents = []
         for doc in split_documents:
-            if '![](data:image/png;base64' in doc.page_content:
+            # D6 修复: 原来只匹配 'data:image/png;base64', jpeg/jpg/gif/webp 的 base64
+            # 走 else 分支把 base64 原文当 text 嵌入(污染 dense/BM25)且图片通道缺失;
+            # 改为匹配任意图片类型(process_images/remove_base64_images 的 regex 本就支持)
+            if '![](data:image/' in doc.page_content:
                 image_docs = self.process_images(doc.page_content, md_file)
                 cleaned_content = self.remove_base64_images(doc.page_content)
                 if cleaned_content.strip():
