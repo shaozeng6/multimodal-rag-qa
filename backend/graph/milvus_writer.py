@@ -11,11 +11,9 @@ from typing import Dict, Optional
 from loguru import logger
 from pymilvus import MilvusClient
 
-from graph.llm_init import (
-    CONTEXT_COLLECTION_NAME,
-    embedding,
-    milvus_client,
-)
+from infra.config import CONTEXT_COLLECTION_NAME
+from infra.embedding import embedding
+from infra.milvus import milvus_client
 from services.config_service import get_int
 
 # 全局线程池用于异步操作

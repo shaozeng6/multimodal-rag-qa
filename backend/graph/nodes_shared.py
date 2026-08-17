@@ -9,7 +9,7 @@ import re
 from typing import Optional
 
 from graph.context import _message_image_url, get_working_window
-from graph.llm_init import image_to_base64
+from infra.dashscope import image_to_base64
 from services.config_service import get_int
 
 # ========= 图片进模型: 上限控制, 控 token(运行时由 sys_config 覆盖, 常量作默认值兜底) =========
@@ -35,7 +35,7 @@ def _image_to_model_url(image: str) -> Optional[str]:
     low = image.strip().lower()
     if low.startswith(("http://", "https://", "data:image/")):
         return image.strip()
-    # 本地文件路径 → base64 data URI(复用 llm_init.image_to_base64)
+    # 本地文件路径 → base64 data URI(复用 infra.dashscope.image_to_base64)
     api_img, _ = image_to_base64(image)
     return api_img or None
 

@@ -7,7 +7,7 @@ from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 把 .env 加载进 os.environ: pydantic-settings 本身会读 .env 填充 Settings,
-# 但散落各处的 os.getenv(如 llm_init 的模型型号) 只认进程环境变量;
+# 但散落各处的 os.getenv(如 infra.config 的模型型号) 只认进程环境变量;
 # 显式 load_dotenv 让两者口径一致, .env 里的基础设施配置(模型/OCR/限流)全部生效。
 load_dotenv()
 

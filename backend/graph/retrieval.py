@@ -18,13 +18,10 @@ from typing import Dict, List, Optional
 from loguru import logger
 from pymilvus import AnnSearchRequest, WeightedRanker
 
-from graph.llm_init import (
-    CONTEXT_COLLECTION_NAME,
-    call_dashscope_once,
-    embedding,
-    m_re,
-    milvus_client,
-)
+from infra.config import CONTEXT_COLLECTION_NAME
+from infra.dashscope import call_dashscope_once
+from infra.embedding import embedding
+from infra.milvus import m_re, milvus_client
 from services.config_service import get_float, get_int
 
 # ========= 配置常量(集中管理; 运行时由 sys_config 覆盖, 常量仅作默认值兜底) =========

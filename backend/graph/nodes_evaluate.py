@@ -11,7 +11,6 @@ from loguru import logger
 
 from graph.context import format_history, get_working_window
 from graph.json_utils import extract_json
-from graph.llm_init import judge_llm, multiModal_llm
 from graph.nodes_shared import (
     _CATEGORY_LABELS,
     EVAL_HISTORY_TURNS,
@@ -21,6 +20,7 @@ from graph.nodes_shared import (
     _retrieved_images_for_model,
 )
 from graph.state import MultiModalRAGState
+from infra.llm import judge_llm, multiModal_llm
 from services.config_service import get_int
 
 

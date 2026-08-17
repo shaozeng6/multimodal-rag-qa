@@ -17,7 +17,9 @@ from loguru import logger
 
 from core.config import settings
 from dots_ocr.parser import do_parse
-from graph import llm_init
+from infra.dashscope import image_to_base64
+from infra.embedding import embedding
+from infra.llm import llm, multiModal_llm
 from ingestion.convert import doc_to_dict, generate_image_description, generate_table_description
 from ingestion.documents import record_document
 from ingestion.embed import process_item, write_to_milvus
@@ -105,7 +107,7 @@ def parse_document(pdf_path: str, filename: str, job_id: str) -> int:
     _check_cancel()
     _stage("分片", "分片进行中", 30)
     splitter = MarkdownDirSplitter(
-        embedding=llm_init.embedding,
+        embedding=embedding,
         images_output_dir=settings.INGEST_IMAGES_DIR,
     )
     docs = splitter.process_md_dir(book_dir, filename)
@@ -148,8 +150,8 @@ def index_document(job_id: str, filename: str, user_id: Optional[int], file_size
     _wait_pause("生成图片/表格描述", "等待执行生成描述")
     _check_cancel()
     _stage("生成图片/表格描述", "生成描述中", 50)
-    items = generate_image_description(items, llm_init.multiModal_llm, llm_init.image_to_base64)
-    items = generate_table_description(items, llm_init.llm)
+    items = generate_image_description(items, multiModal_llm, image_to_base64)
+    items = generate_table_description(items, llm)
     _stage("生成图片/表格描述", f"描述完成, 共 {len(items)} 条", 60)
 
     # ⑤ 向量化(循环内逐条响应暂停/取消)

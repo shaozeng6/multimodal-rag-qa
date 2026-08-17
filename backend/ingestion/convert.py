@@ -1,6 +1,6 @@
 """文档转换与描述生成(移植自入库项目 milvus_db/db_operator.py)。
 
-LLM 客户端从 graph/llm_init 注入(multiModal_llm / llm / image_to_base64),
+LLM 客户端从 infra 注入(multiModal_llm / llm / image_to_base64),
 不在此新建客户端。
 """
 import os

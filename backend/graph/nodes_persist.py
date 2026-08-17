@@ -16,9 +16,9 @@ from graph.context import (
     compress_summary,
     input_modality,
 )
-from graph.llm_init import rewriter_llm
 from graph.milvus_writer import get_milvus_writer
 from graph.state import MultiModalRAGState
+from infra.llm import rewriter_llm
 from services.config_service import get_float
 
 

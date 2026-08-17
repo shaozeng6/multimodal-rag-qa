@@ -126,7 +126,7 @@ async def _generate_image_title(image_url: str) -> str:
     try:
         from langchain_core.messages import HumanMessage
 
-        from graph.llm_init import multiModal_llm
+        from infra.llm import multiModal_llm
 
         message = HumanMessage(content=[
             {"type": "text", "text": "请用不超过20个汉字简短描述这张图片,作为会话标题。只输出标题文字,不要输出其他内容。"},

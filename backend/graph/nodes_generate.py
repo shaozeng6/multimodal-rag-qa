@@ -10,7 +10,6 @@ from langchain_core.runnables import RunnableConfig
 from loguru import logger
 
 from graph.context import get_working_window
-from graph.llm_init import multiModal_llm
 from graph.nodes_shared import (
     _CATEGORY_LABELS,
     _auto_attribution_evidence,
@@ -18,6 +17,7 @@ from graph.nodes_shared import (
     _image_to_model_url,
 )
 from graph.state import MultiModalRAGState
+from infra.llm import multiModal_llm
 
 
 def _build_system_prompt(summary: str, kb_context: list, image_relation: str) -> str:

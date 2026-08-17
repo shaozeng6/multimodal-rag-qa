@@ -1,4 +1,4 @@
-"""向量化与入库(复用 graph/llm_init 的 dashscope 嵌入与 Milvus 客户端)。
+"""向量化与入库(复用 infra 的 dashscope 嵌入与 Milvus 客户端)。
 
 保持对称性原则(见 KNOWN_ISSUES.md 设计决策区):
 - 图片 → {"image": img} 纯视觉向量(与检索侧一致)
@@ -9,12 +9,9 @@ from typing import Dict, List, Optional
 
 from loguru import logger
 
-from graph.llm_init import (
-    COLLECTION_NAME,
-    call_dashscope_once,
-    milvus_client,
-    normalize_image,
-)
+from infra.config import COLLECTION_NAME
+from infra.dashscope import call_dashscope_once, normalize_image
+from infra.milvus import milvus_client
 from services.config_service import get_float, get_int
 
 MAX_RETRIES = 3  # 默认值兜底, 运行时由 sys_config 覆盖

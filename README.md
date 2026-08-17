@@ -130,13 +130,15 @@ flowchart TD
 
 ```
 backend/
-  api/         路由层(auth / chat / knowledge / sessions / files)
-  core/        配置、依赖注入、JWT 安全
-  db/          MySQL 连接与 schema_v2.sql(表结构参考)
-  graph/       LangGraph 工作流节点(检索 / 生成 / 评估 / 持久化 / 图片分析)
-  ingestion/   入库管道(PDF / OCR / 分块 / 向量化 / 任务)
+  api/         路由层(auth / chat / knowledge / sessions / reviews / users / files / config)
+  core/        配置(core.config + 配置中心默认值)、依赖注入、JWT 安全
+  db/          MySQL 连接与幂等迁移、Milvus 集合初始化(milvus_setup)
+  graph/       LangGraph 工作流(节点 / 状态 / 检索 / 上下文摘要 / 图片理解 / JSON 解析)
+  infra/       基础设施层(LLM 实例 / Embedding / Milvus 检索器 / DashScope 限流与调用)
+  ingestion/   入库管道(PDF / OCR / 分块 / 描述 / 向量化 / 任务调度)
   models/      SQLAlchemy ORM 模型
-  services/    业务服务层(认证 / 会话 / 消息 / 图片存储)
+  services/    业务服务层(认证 / 会话 / 消息 / 图片存储 / 配置中心)
+  scripts/     开发与验证脚本(如 LangGraph 取消语义复现)
   main.py      FastAPI 应用入口
 frontend/
   src/views/   页面

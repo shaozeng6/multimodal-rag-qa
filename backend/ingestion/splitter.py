@@ -1,7 +1,7 @@
 """Markdown 目录分片(移植自入库项目 splitters/splitter_md.py)。
 
 改动:
-- embedding 改为构造函数注入(复用 graph/llm_init.embedding)
+- embedding 改为构造函数注入(复用 infra.embedding)
 - 去掉对 milvus_db.db_operator / my_llm 的顶层 import(历史残留)
 - SemanticChunker 不可用时回退纯文本切分
 """

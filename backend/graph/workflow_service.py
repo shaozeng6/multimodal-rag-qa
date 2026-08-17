@@ -20,17 +20,12 @@ from langgraph.graph import StateGraph
 from loguru import logger
 
 from core.config import settings
-from graph.nodes import (
-    evaluate_answer,
-    generator_node,
-    human_approval,
-    image_analysis_node,
-    persist_context_node,
-    process_input,
-    query_rewriter_node,
-    regenerate_node,
-    retriever_node,
-)
+# 架构整理(2026-08): 去掉 nodes.py 门面, 直接引各节点模块
+from graph.nodes_evaluate import evaluate_answer
+from graph.nodes_generate import generator_node, human_approval, regenerate_node
+from graph.nodes_input import image_analysis_node, process_input, query_rewriter_node
+from graph.nodes_persist import persist_context_node
+from graph.retrieval import unified_retrieve as retriever_node
 from graph.routers import (
     route_human_approval_node,
     route_human_node,

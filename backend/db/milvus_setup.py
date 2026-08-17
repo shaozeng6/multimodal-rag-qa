@@ -1,7 +1,7 @@
 """Milvus 集合初始化(schema 自包含, 从旧项目 milvus_db/collections_operator.py 合并)。
 
 适配企业版配置:
-- 复用 graph/llm_init 的 milvus_client / COLLECTION_NAME / CONTEXT_COLLECTION_NAME / EMBEDDING_DIMENSIONS
+- 复用 infra 的 milvus_client / COLLECTION_NAME / CONTEXT_COLLECTION_NAME / EMBEDDING_DIMENSIONS
 - sparse 字段由 Milvus **BM25 Function** 从 text / context_text 自动生成, 写入侧不写 sparse
   (审计 C1/#10 的"写入侧缺 sparse"是误报——检索/写入代码与旧项目一致, sparse 是 auto-generated)
 - create 幂等: 集合已存在则跳过; --force 才删除重建(会清空数据, 谨慎)
@@ -16,12 +16,12 @@ import sys
 from loguru import logger
 from pymilvus import DataType, Function, FunctionType
 
-from graph.llm_init import (
+from infra.config import (
     COLLECTION_NAME,
     CONTEXT_COLLECTION_NAME,
     EMBEDDING_DIMENSIONS,
-    milvus_client,
 )
+from infra.milvus import milvus_client
 
 # BM25 倒排索引参数(与旧项目一致)
 _BM25_INDEX_PARAMS = {

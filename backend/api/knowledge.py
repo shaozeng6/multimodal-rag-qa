@@ -357,7 +357,8 @@ async def document_chunks(
 async def knowledge_status(current_user: User = Depends(require_admin)):
     """知识库真实统计: Milvus t_doc_collection 实体数 + MySQL 文档元数据。"""
     try:
-        from graph.llm_init import COLLECTION_NAME, milvus_client
+        from infra.config import COLLECTION_NAME
+        from infra.milvus import milvus_client
         from ingestion.documents import count_documents, sum_char_count
 
         stats = milvus_client.get_collection_stats(collection_name=COLLECTION_NAME)
